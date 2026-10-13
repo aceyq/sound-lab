@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Network requests may only go to this app's own origin and to the
+         PeerJS signaling server used to pair the phone with the laptop. -->
+    <meta http-equiv="Content-Security-Policy" content="connect-src 'self' https://0.peerjs.com wss://0.peerjs.com" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230e1117'/%3E%3Cpath d='M3 16c3-9 5-9 6.5 0s3.5 9 6.5 0 5-9 6.5 0 3.5 9 6.5 0' fill='none' stroke='%2358d1ff' stroke-width='2.6'/%3E%3C/svg%3E" />
+    <title>Sound &amp; Signals Lab</title>
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">Sound &amp; Signals Lab</div>
+      <nav class="app-nav" aria-label="Projects">
+        <a href="#/frequency" data-route="/frequency">1. Frequency Playground</a>
+        <a href="#/motion-score" data-route="/motion-score">2. Motion Score</a>
+      </nav>
+    </header>
+    <main id="app"></main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
