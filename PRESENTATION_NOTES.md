@@ -254,7 +254,7 @@ See README → "Deploy to GitHub Pages". Once deployed, the pages are:
 - Phone (made automatically by the QR code): `https://<user>.github.io/<repo>/#/controller?session=…&code=…`
 - Project 1: `https://<user>.github.io/<repo>/#/frequency`
 
-**Verified hosted URL:** none yet. This folder is not a git repository and has no GitHub remote, so nothing has been deployed.
+**Verified hosted URL:** https://aceyq.github.io/sound-lab/#/motion-score (Project 1: https://aceyq.github.io/sound-lab/#/frequency). Repository: https://github.com/aceyq/sound-lab. Every push to `main` redeploys automatically.
 
 ### Phone pairing without the QR code
 

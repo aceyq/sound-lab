@@ -48,9 +48,9 @@ BASE_PATH=/<repo-name>/ npm run build
 
 Routing uses `#/frequency`, `#/motion-score` and `#/controller?session=…&code=…`, so no server rewrite rules are needed and every page works when its URL is opened directly. The phone link and QR code are generated from the page's real origin and base path, so they keep the `/<repo>/` sub-path. GitHub Pages is HTTPS, which phones require for motion sensors. GitHub Pages is static hosting only: there is no server of our own; pairing relies on the external PeerJS service.
 
-**Status: not deployed.** This folder is not a git repository and has no GitHub remote, so no hosted URL exists yet.
+**Status: deployed** at https://aceyq.github.io/sound-lab/ from https://github.com/aceyq/sound-lab (Motion Score: https://aceyq.github.io/sound-lab/#/motion-score). Every push to `main` redeploys. To update after editing: `git add . && git commit -m "…" && git push`.
 
-To publish (one time):
+How it was set up (for a fresh repository):
 
 1. Create an empty repository on github.com, e.g. `sound-lab` (public, or private on a plan that allows Pages).
 2. In Terminal:
