@@ -101,7 +101,7 @@ Design choices worth knowing:
 
 | Part | File | Notes |
 | --- | --- | --- |
-| Laptop Performance page | `src/pages/motion-score/index.js` | Setup checklist, Play area, Learn/settings, Laptop Demo, Presentation Mode, Demo Guide. A 50 Hz control loop applies the instrument to the audio; drawing runs on animation frames. |
+| Laptop Performance page | `src/pages/motion-score/index.js` | Setup checklist, Play area with inline ⓘ explanations and ? buttons, diagnostics, Laptop Demo, Presentation Mode, spotlight Demo Guide (`src/lib/tour.js`). A 50 Hz control loop applies the instrument to the audio; drawing runs on animation frames. |
 | Phone Controller page | `src/pages/motion-score/controller.js` | Enable Sensors (feature-detects `requestPermission` and calls both in the same tap), Calibrate, Arm/Disarm, Emergency Mute, Wake Lock where available. Sends a sample only when new sensor readings arrived, ≈25 per second. |
 | Connection | `src/pages/motion-score/connection.js` | PeerJS 1.5.5. Laptop listens on a random session ID; phone sends a `hello` with the 6-character pairing code; one phone at a time; 12 s / 15 s timeouts; 1 s heartbeats, 4 s silence = lost; outgoing messages are dropped rather than queued when the channel backs up. ICE: PeerJS defaults (Google STUN + PeerJS public TURN); no TURN server of our own. |
 | Message validation | `src/pages/motion-score/protocol.js` | Every incoming message is type- and range-checked; unknown fields are dropped; malformed messages are counted and ignored. |

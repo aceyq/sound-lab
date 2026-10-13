@@ -4,7 +4,7 @@ Motion Score is Project 2: **turn dance movement into sound.** A phone's motion 
 
 > This uses phone sensor measurements and explicitly programmed mappings to synthesize sound. It does not train a model to recognize dance movements.
 
-Notes for Project 1 (Frequency Playground) are further down.
+Notes for Project 1 (Frequency Playground) are further down. For a word-for-word script with click cues for both projects, see `SPEAKER_NOTES.md`.
 
 ---
 
@@ -79,8 +79,10 @@ Labels match the app exactly.
 | **■ Stop Audio** | Fades out, stops the audio engine and disarms. | When finished. | Audio: *Off*. |
 | **Master Volume** | Overall listening level (starts at 15%). Does not change Expression. | Set before playing, low at first. | Louder/quieter; the spectrogram also gets brighter/darker because it measures the output. |
 | **❄ Freeze Visual History** | Freezes only the Movement Score, spectrogram and audio graphs. Sound and safety checks keep running. | To explain a picture. | Yellow "VISUAL HISTORY FROZEN" label. Button becomes **▶ Unfreeze Visual History**. |
-| **🧭 Demo Guide** | Small card with one demonstration step at a time (Back / Next / Close). It never plays sound or fakes data. | During the class demo. | Step text in the bottom-right corner. |
-| **🖥 Presentation Mode** | Hides Setup and the Learn section; enlarges the live values and graphs. Status bar and Panic stay visible. | While screen sharing. | Button becomes **✕ Exit Presentation** (or press Esc). |
+| **🧭 Demo Guide** | Guided tour: dims the page, highlights one part at a time, and shows what it is and what to try (Back / Next / Close, or Esc). It never plays sound or fakes data. | Learning the app, or as a prompt during the demo. | A bright outline around the part being explained and a card beside it. |
+| **?** buttons (next to titles) | Open the Demo Guide at the step that explains that part. | When you want to explain one specific control. | Same spotlight, starting at that part. |
+| **ⓘ** lines | Short explanation that opens in place, with "More detail". | Answering a "why" question. | Text expands under the line. |
+| **🖥 Presentation Mode** | Hides Setup, the explanations and section C; enlarges the live values and graphs. Status bar and Panic stay visible. | While screen sharing. | Button becomes **✕ Exit Presentation** (or press Esc). |
 | **Clear Movement Score** | Erases the Movement Score history. | Before a demo. | Empty tracks. |
 | **Clear Spectrogram** | Erases the spectrogram history. | Before a demo. | Empty spectrogram. |
 
@@ -93,14 +95,15 @@ Labels match the app exactly.
 | **⚡ Trigger Accent (A)** | Simulated sharp movement → short note in Accents mode. Key A (or Space). | Accents mode only. | One short note, orange marker. |
 | **Stop Laptop Demo** | Turns off simulated input (silences and disarms). | When done with the fallback. | Input: *None*. |
 
-### Laptop: C · Learn and settings (expandable)
+### Laptop: settings and explanations
+
+Explanations sit next to the parts they explain (ⓘ lines). Sensitivity and Invert tilt are under **⚙ Adjust sensitivity and tilt direction** in Setup step 3; the waveform and spectrum are under **Audio graphs** below the spectrogram. Section **C · Diagnostics and presentation help** keeps the technical details.
+
 
 | Control | What it does | When to use it | What I should observe |
 | --- | --- | --- | --- |
-| **How it works** | Short explanations, each with "More detail". | Preparing / answering questions. | Text. |
-| **Calibration and sensitivity → Sensitivity** (0.5×–2×) | Higher = smaller movements reach 100% intensity and lighter flicks count as accents. | Sound too quiet → raise; never silent → lower. | Movement % changes for the same motion. |
+| **⚙ Adjust sensitivity and tilt direction → Sensitivity** (0.5×–2×) | Higher = smaller movements reach 100% intensity and lighter flicks count as accents. | Sound too quiet → raise; never silent → lower. | Movement % changes for the same motion. |
 | **Invert tilt** | Swaps the pitch direction. | If "toward me = higher" feels backwards. | Opposite pitch direction. |
-| **Recalibrate** | Same as Calibrate. | After changing grip. | Same as Calibrate. |
 | **Audio graphs** | 20 ms waveform and current spectrum of the output. | Explaining harmonics. | Peaks at 1×, 2×, 3×… the fundamental. |
 | **Diagnostics** | Raw sensor values (degrees, m/s², m/s³), update rates, last-sample age, rejected messages, audio details. | Troubleshooting. | Numbers update live. |
 | **Presentation help** | Zoom steps and the 30-second demo. | Before presenting. | Text. |
@@ -161,9 +164,9 @@ Tilt and movement intensity are physically linked (tilting is itself a movement)
 - **Controlled wrist tilt** (Flow or Pentatonic): a melody by tilting while keeping a small, steady motion so the sound sustains.
 - **Sharp hits** (Accents + Pentatonic): punctuation on beats; each hit's tilt picks the note.
 
-### Demo Guide steps (in the app)
+### Demo Guide (in the app)
 
-1. Connect and calibrate the phone. 2. Start audio and arm the instrument. 3. Stay still: observe silence. 4. Move gently. 5. Change tilt. 6. Switch to Accents: trigger a short note. 7. Compare the Movement Score with the spectrogram. 8. Disarm or Panic to finish.
+17 spotlight steps: status bar → setup → Mute / Panic → Fundamental → Harmonic components → Expression → Flow vs Accents → Continuous vs Pentatonic → audio controls → the three rules → each Movement Score track → spectrogram → Freeze → Presentation Mode → finish.
 
 ---
 
@@ -175,7 +178,7 @@ Tilt and movement intensity are physically linked (tilting is itself a movement)
 - **Why does stronger movement add harmonics?** It's my design choice: more energy → brighter, richer timbre feels natural. Mathematically it adds components at 2f, 3f, … with amplitudes 1/n.
 - **How is gravity handled?** Most phones report acceleration with gravity already removed. Otherwise the app estimates gravity as the slowly changing part of the signal and subtracts it, which is an approximation.
 - **Why does sound stop when I stop moving?** In Flow, Expression follows movement intensity, and calibration makes stillness count as 0%. It fades over ~0.35 s so short pauses don't chatter.
-- **Why are Flow and Accents different?** Same sensors, two interpretations: Flow uses continuous intensity for sustained sound; Accents listens for sudden changes (jerk) and plays one short note each time.
+- **Why are Flow and Accents different?** Same sensors, two interpretations. Flow is like bowing a violin: sound lasts while you keep moving. Accents is like hitting a drum: smooth movement is silent, each sharp change (jerk) plays one short note.
 - **What happens if the phone disconnects?** The laptop goes silent within about 0.15 s, cancels any accent, shows *Connection lost*, and disarms; you must Arm again. If data simply stops for 0.5 s it goes silent; after 3 s it disarms. The laptop enforces this itself, even if the phone can't send a goodbye.
 - **What is simulated in Laptop Demo?** Tilt, movement intensity and accents come from sliders/keys instead of the phone. They go through the same mappings and audio. It's always labeled "Laptop Demo — phone sensors are not connected."
 - **Is the connection secure?** A random session ID and pairing code keep other phones out and only one phone is accepted, but it's a classroom tool, not for sensitive data.

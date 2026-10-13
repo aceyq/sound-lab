@@ -381,3 +381,48 @@ body.controller-page #app { padding: 12px 14px 40px; max-width: 560px; }
 .pc-step:empty { display: none; }
 .pc-action .pc-btn.primary { min-height: 72px; font-size: 1.3em; }
 .pc-buttons .pc-btn:not(.danger) { grid-column: auto; }
+
+/* ───────────── Inline help: "?" buttons and ⓘ explanations ───────────── */
+.ms-info {
+  font: inherit; font-size: 0.75em; font-weight: 800; width: 20px; height: 20px; border-radius: 50%; padding: 0; margin-left: 6px;
+  border: 1.5px solid var(--accent); background: transparent; color: var(--accent); cursor: pointer; vertical-align: 2px; line-height: 1;
+}
+.ms-info:hover { background: var(--accent); color: #001018; }
+.pv-label .ms-info { vertical-align: 0; }
+.ms-explain { margin-top: 6px; font-size: 0.92em; }
+.ms-explain > summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+.ms-explain[open] { background: var(--card-2); border-radius: 8px; padding: 6px 10px; }
+.ms-explain p { margin: 6px 0; color: #d3dce6; }
+.ms-explain-row { display: flex; flex-wrap: wrap; gap: 4px 22px; margin: -4px 0 10px; }
+.ms-explain-row .ms-explain[open] { flex-basis: 100%; }
+.ms-read { margin: 4px 0 6px; color: #d3dce6; font-size: 0.95em; }
+.ms-chips { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 6px; font-size: 0.88em; }
+.ms-chip { display: inline-flex; align-items: center; gap: 6px; }
+.ms-chip i { display: inline-block; width: 18px; height: 5px; border-radius: 3px; }
+.ms-chip i.dash { height: 0; border-top: 2px dashed #f0f6fc; }
+.ms-mode-cards { display: grid; gap: 6px; margin-top: 8px; }
+.ms-mode-card { display: grid; grid-template-columns: 26px 1fr; gap: 8px; font-size: 0.9em; color: #d3dce6; padding: 6px 8px; border-radius: 8px; border: 1px solid transparent; opacity: 0.6; }
+.ms-mode-card.active { opacity: 1; border-color: var(--accent); background: #0d1d33; }
+.ms-mode-icon { font-size: 1.3em; color: var(--accent); text-align: center; }
+.ms-present .ms-explain, .ms-present .ms-explain-row, .ms-present .ms-read { display: none; }
+.ms-present .ms-mode-card:not(.active) { display: none; }
+
+/* ───────────── Spotlight tour ───────────── */
+.tour-hole {
+  position: fixed; z-index: 90; border-radius: 12px; pointer-events: none;
+  box-shadow: 0 0 0 4px var(--accent), 0 0 0 9999px rgba(3, 6, 10, 0.72);
+  transition: left 0.2s, top 0.2s, width 0.2s, height 0.2s;
+}
+.tour-hole[hidden] { display: none; }
+.tour-shade { position: fixed; inset: 0; z-index: 90; background: rgba(3, 6, 10, 0.72); pointer-events: none; }
+.tour-shade[hidden] { display: none; }
+.tour-pop {
+  position: fixed; z-index: 91; background: #10233a; border: 2px solid var(--accent); border-radius: 12px; padding: 14px 16px;
+  box-shadow: 0 16px 50px rgba(0,0,0,0.6); display: grid; gap: 8px; color: var(--text);
+}
+.tour-count { font-size: 0.78em; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; }
+.tour-title { font-size: 1.2em; font-weight: 800; line-height: 1.25; }
+.tour-body { color: #dbe4ee; font-size: 0.97em; line-height: 1.45; }
+.tour-try { background: #0b2a1a; border-left: 3px solid var(--ok); padding: 6px 10px; border-radius: 6px; color: #c8f5d3; font-weight: 600; font-size: 0.95em; }
+.tour-try[hidden] { display: none; }
+.tour-buttons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }

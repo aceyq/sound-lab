@@ -51,7 +51,7 @@ export class MovementScore {
   render(nowSec, { frozen, mode }) {
     const sf = this.surface;
     const ctx = sf.begin();
-    const PAD = { l: 112, r: 16, t: 10, b: 34 };
+    const PAD = { l: 150, r: 132, t: 10, b: 34 };
     const W = sf.w - PAD.l - PAD.r;
     const H = sf.h - PAD.t - PAD.b;
     const gap = 10;
@@ -81,9 +81,12 @@ export class MovementScore {
       ctx.fillStyle = COLORS.muted;
       ctx.fillText(sub, 8, tr.y + 19);
     };
-    label(tracks.p, 'Pitch', '← tilt', C.pitch);
-    label(tracks.i, 'Movement', '→ richness, expression', C.intensity);
-    label(tracks.h, 'Harmonics', 'components', C.harm);
+    label(tracks.p, 'Pitch', 'from tilt', C.pitch);
+    label(tracks.i, 'Movement', 'how hard you move', C.intensity);
+    label(tracks.h, 'Harmonics', 'how rich the tone', C.harm);
+    // Track positions (CSS px inside the canvas) for the guided tour.
+    this.tracks = {};
+    for (const [k, tr] of Object.entries(tracks)) this.tracks[k] = { x: 0, y: tr.y, w: sf.w, h: tr.h };
 
     // Axis ticks.
     const yP = (f) => tracks.p.y + (1 - pitchToUnit(f)) * tracks.p.h;
@@ -200,6 +203,30 @@ export class MovementScore {
       ctx.setLineDash([]);
     }
     ctx.restore();
+
+    // "Now" readouts on the right: the latest value of each track.
+    const last = pts[pts.length - 1];
+    const rx = PAD.l + W + 10;
+    const readout = (tr, big, small, color) => {
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = color;
+      ctx.font = '700 16px system-ui, sans-serif';
+      ctx.fillText(big, rx, tr.y + 4);
+      ctx.font = '12px system-ui, sans-serif';
+      ctx.fillStyle = COLORS.muted;
+      if (small) ctx.fillText(small, rx, tr.y + 24);
+    };
+    ctx.fillStyle = COLORS.muted;
+    ctx.font = '11px system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    if (last) {
+      readout(tracks.p, last.f0 == null ? '—' : `${Math.round(last.f0)} Hz`, last.f0 == null ? 'not calibrated' : `${noteName(last.f0).name}${last.sound ? ' · sounding' : ' · silent'}`, C.pitch);
+      readout(tracks.i, last.inten == null ? '—' : `${Math.round(last.inten * 100)}%`, mode === 'flow' ? `expression ${Math.round((last.expr || 0) * 100)}%` : 'sharp hit = note', C.intensity);
+      readout(tracks.h, last.count == null ? '—' : String(last.count), 'components', C.harm);
+    }
+    ctx.font = '12px system-ui, sans-serif';
     if (frozen) {
       ctx.fillStyle = 'rgba(227,179,65,0.10)';
       ctx.fillRect(PAD.l, PAD.t, W, H);

@@ -12,7 +12,8 @@ import * as M from './mapping.js';
 import { Instrument } from './instrument.js';
 import { MotionSynth } from './synth.js';
 import { MovementScore, WaveScope, C } from './viz.js';
-import { HONESTY, MAPPINGS, MODE_TEXT, PITCH_TEXT, HOW, DEMO_GUIDE, ZOOM_STEPS, PERFORMANCE_30S } from './content.js';
+import { HONESTY, MAPPINGS, MODE_TEXT, PITCH_TEXT, HOW, ZOOM_STEPS, PERFORMANCE_30S } from './content.js';
+import { Tour } from '../../lib/tour.js';
 
 const DEFAULT_MASTER = 0.15;
 const SG_RANGE = { min: 80, max: 12000, log: true };
@@ -35,7 +36,6 @@ export function mount(root) {
     message: '', // last action feedback
     frozen: false,
     presentation: false,
-    guideStep: -1,
     demo: { tilt: 0, intensity: 0, accent: false, seq: 0 },
     rx: { count: 0, times: [], lastSample: null, seqGaps: 0, lastSeq: null, phoneRate: 0 },
   };
@@ -44,6 +44,20 @@ export function mount(root) {
   const el = {};
   const help = (text, cls = '') => h('p', { class: ('help ' + cls).trim() }, text);
   const btn = (label, onclick, cls = 'btn', extra = {}) => h('button', { class: cls, onclick, ...extra }, label);
+  // "?" opens the guided tour at the step that explains this part.
+  const info = (id, what) => h('button', { class: 'ms-info', title: `Explain ${what}`, 'aria-label': `Explain ${what}`, onclick: () => tour.start(id) }, '?');
+  // Short explanation that opens in place, with an optional deeper layer.
+  const explain = (i) => {
+    const [t, short, more] = HOW[i];
+    return h('details', { class: 'ms-explain' }, h('summary', {}, `ⓘ ${t}`),
+      h('p', {}, short), h('details', { class: 'ms-detail' }, h('summary', {}, 'More detail'), h('p', {}, more)));
+  };
+
+  // Calibration settings (shown inside Setup step 3).
+  el.sens = h('input', { type: 'range', min: 0.5, max: 2, step: 0.05, value: 1, 'aria-label': 'Sensitivity', oninput: () => { inst.settings.sensitivity = Number(el.sens.value); render(); } });
+  el.sensOut = h('span', { class: 'mono' }, '1.00×');
+  el.invert = h('input', { type: 'checkbox', onchange: () => { inst.settings.invertTilt = el.invert.checked; render(); } });
+  el.calValues = h('div', { class: 'mono help' });
 
   // Status bar (always visible, also in Presentation Mode).
   const pill = () => h('span', { class: 'ms-pill' });
@@ -104,34 +118,48 @@ export function mount(root) {
   el.step1 = step(1, 'Connect Phone', 'on laptop', h('div', {},
     h('div', { class: 'row gap wrap' }, el.connectBtn, el.demoBtn),
     help('Connect Phone shows a QR code for your phone. No phone, or the network blocks pairing? Use Laptop Demo (simulated input).'),
-    el.pairing));
+    el.pairing, explain(0)));
   el.step2 = step(2, 'Enable Sensors on Phone', 'on phone', help('On the phone, tap the big Enable Sensors button and choose Allow. The status bar then shows Sensors: Active.'));
   el.step3 = step(3, 'Calibrate', 'automatic', h('div', {},
     h('div', { class: 'row gap wrap' }, el.calBtn, h('span', { class: 'help inline' }, 'Starts by itself when the sensors turn on: hold the phone comfortably and still for 3 s. Sets your neutral tilt and the sensor noise at rest. Use the button to redo it.')),
-    el.calText));
+    el.calText,
+    h('details', { class: 'ms-explain' }, h('summary', {}, '⚙ Adjust sensitivity and tilt direction'),
+      h('label', { class: 'row gap ms-vol' }, h('span', {}, 'Sensitivity'), el.sens, el.sensOut),
+      help('Higher sensitivity: smaller movements reach 100% intensity and lighter flicks count as accents. Raise it if the sound stays quiet; lower it if the sound never goes silent.'),
+      h('label', { class: 'check' }, el.invert, ' Invert tilt (tilt away from you = higher)'),
+      el.calValues),
+    explain(6)));
   el.step4 = step(4, 'Start Audio and Arm Phone', 'laptop (Arm also on phone)', h('div', {},
     h('div', { class: 'row gap wrap' }, el.startBtn, el.armBtn),
     help('Start Audio turns on the laptop\'s sound engine. Arm lets movement control the sound; Disarm pauses it and silences.')));
   el.setupMsg = h('p', { class: 'note' });
   el.setup = h('section', { class: 'card ms-setup' },
-    h('div', { class: 'viz-head' }, h('h2', {}, 'A · Setup'), h('span', { class: 'ms-setup-summary' })),
+    h('div', { class: 'viz-head' }, h('h2', {}, 'A · Setup ', info('setup', 'setup')), h('span', { class: 'ms-setup-summary' })),
     h('ol', { class: 'ms-steps' }, el.step1.root, el.step2.root, el.step3.root, el.step4.root),
     el.setupMsg);
   el.setupSummary = el.setup.querySelector('.ms-setup-summary');
 
   // B. Play.
-  const value = (label, sub) => {
+  const value = (label, sub, id) => {
     const v = h('div', { class: 'pv-value mono' }, '—');
     const s = h('div', { class: 'pv-sub' }, sub);
-    return { root: h('div', { class: 'pv-card' }, h('div', { class: 'pv-label' }, label), v, s), v, s };
+    return { root: h('div', { class: 'pv-card' }, h('div', { class: 'pv-label' }, label, id ? info(id, label) : null), v, s), v, s };
   };
-  el.vF = value('Fundamental', '← tilt');
-  el.vH = value('Harmonic components', '← movement intensity');
-  el.vE = value('Expression', 'movement-controlled strength');
-  el.vMode = value('Mode', '');
+  el.vF = value('Fundamental', '← tilt', 'fundamental');
+  el.vH = value('Harmonic components', '← movement intensity', 'harmonics');
+  el.vE = value('Expression', 'movement-controlled strength', 'expression');
+  el.vMode = value('Mode', '', 'mode');
   el.modeFlow = btn('Flow', () => setMode('flow'), 'btn seg');
   el.modeAcc = btn('Accents', () => setMode('accents'), 'btn seg');
-  el.modeText = h('p', { class: 'ms-mode-text' });
+  // Flow vs Accents, explained with an everyday comparison.
+  el.flowCard = h('div', { class: 'ms-mode-card' },
+    h('div', { class: 'ms-mode-icon' }, '〰'),
+    h('div', {}, h('strong', {}, 'Flow = sustained sound, like bowing a violin.'), ' ', MODE_TEXT.flow));
+  el.accCard = h('div', { class: 'ms-mode-card' },
+    h('div', { class: 'ms-mode-icon' }, '✦'),
+    h('div', {}, h('strong', {}, 'Accents = short notes, like hitting a drum.'), ' ', MODE_TEXT.accents));
+  el.modeText = h('div', { class: 'ms-mode-cards' }, el.flowCard, el.accCard,
+    h('p', { class: 'ms-mode-text' }, 'Same phone, same sensors: these are just two ways of turning your movement into sound.'));
   el.pCont = btn('Continuous', () => setPitchMode('continuous'), 'btn seg');
   el.pPent = btn('Pentatonic', () => setPitchMode('pentatonic'), 'btn seg');
   el.stopBtn = btn('■ Stop Audio', () => stopAudio(), 'btn');
@@ -148,7 +176,7 @@ export function mount(root) {
   el.clearSg = btn('Clear Spectrogram', () => spectrogram.clear(), 'btn small', { title: 'Erases the spectrogram history. Does not change sound.' });
   el.freezeBtn = btn('❄ Freeze Visual History', () => toggleFreeze(), 'btn');
   el.presentBtn = btn('🖥 Presentation Mode', () => togglePresentation(), 'btn');
-  el.guideBtn = btn('🧭 Demo Guide', () => openGuide(), 'btn');
+  el.guideBtn = btn('🧭 Demo Guide', () => tour.start(0), 'btn', { title: 'A guided tour: dims the page and points at each part with what to say and what to try. It never plays sound by itself.' });
   el.frozenBadge = h('div', { class: 'ms-frozen', hidden: true }, '❄ VISUAL HISTORY FROZEN: sound and safety checks are still live');
 
   // Laptop Demo panel.
@@ -170,27 +198,34 @@ export function mount(root) {
     h('div', { class: 'viz-head' }, h('h2', {}, 'B · Play'), h('div', { class: 'row gap wrap' }, el.freezeBtn, el.guideBtn, el.presentBtn)),
     h('div', { class: 'pv-row ms-values' }, el.vF.root, el.vH.root, el.vE.root, el.vMode.root),
     h('div', { class: 'ms-controls' },
-      h('div', { class: 'ms-ctl' }, h('div', { class: 'ms-ctl-title' }, 'Performance mode'), h('div', { class: 'seg-group' }, el.modeFlow, el.modeAcc), el.modeText),
-      h('div', { class: 'ms-ctl' }, h('div', { class: 'ms-ctl-title' }, 'Pitch'), h('div', { class: 'seg-group' }, el.pCont, el.pPent), h('p', { class: 'ms-mode-text' }, PITCH_TEXT)),
-      h('div', { class: 'ms-ctl' }, h('div', { class: 'ms-ctl-title' }, 'Audio'),
+      el.modeCtl = h('div', { class: 'ms-ctl' }, h('div', { class: 'ms-ctl-title' }, 'Performance mode ', info('mode', 'Flow and Accents')), h('div', { class: 'seg-group' }, el.modeFlow, el.modeAcc), el.modeText),
+      el.pitchCtl = h('div', { class: 'ms-ctl' }, h('div', { class: 'ms-ctl-title' }, 'Pitch ', info('pitch', 'Continuous and Pentatonic')), h('div', { class: 'seg-group' }, el.pCont, el.pPent), h('p', { class: 'ms-mode-text' }, PITCH_TEXT),
+        h('p', { class: 'ms-mode-text muted' }, 'Pentatonic is like a piano where every key you can land on fits together, so any movement sounds musical.')),
+      el.audioCtl = h('div', { class: 'ms-ctl' }, h('div', { class: 'ms-ctl-title' }, 'Audio ', info('audio', 'the audio controls')),
         h('div', { class: 'row gap wrap' }, el.startBtn2, el.stopBtn, el.armBtn2),
         h('label', { class: 'row gap ms-vol' }, h('span', {}, 'Master Volume'), el.vol, el.volOut),
         h('p', { class: 'ms-mode-text' }, 'Master Volume is the listening level you set; Expression comes from movement.'))),
     el.demoPanel,
     el.legend,
+    h('div', { class: 'ms-explain-row' }, explain(1), explain(2), explain(4), explain(5), explain(7)),
     h('div', { class: 'ms-viz' },
-      h('div', { class: 'ms-viz-head' }, h('h3', {}, 'Movement Score'), h('span', { class: 'help inline' }, 'Control values from the phone over the last 10 s: pitch (blue), movement intensity (green), expression (white dashes, Flow), harmonic components (purple), accents (orange).'), el.clearScore),
-      h('div', { class: 'canvas-box ms-score-box' }, el.scoreCanvas, el.frozenBadge)),
+      h('div', { class: 'ms-viz-head' }, h('h3', {}, 'Movement Score ', info('score-pitch', 'the Movement Score')), el.clearScore),
+      h('p', { class: 'ms-read' }, 'Read it like a music score: time runs left → right, newest at "now". It shows what your phone told the instrument, not the sound itself.'),
+      h('div', { class: 'ms-chips' },
+        h('span', { class: 'ms-chip' }, h('i', { style: { background: C.pitch } }), 'Blue line: the note you are playing (higher line = higher pitch)'),
+        h('span', { class: 'ms-chip' }, h('i', { style: { background: C.intensity } }), 'Green: how hard you are moving'),
+        h('span', { class: 'ms-chip' }, h('i', { class: 'dash' }), 'White dashes: how loud that makes it (Flow)'),
+        h('span', { class: 'ms-chip' }, h('i', { style: { background: C.harm } }), 'Purple steps: how many harmonics'),
+        h('span', { class: 'ms-chip' }, h('i', { style: { background: C.accent } }), 'Orange line: an accent hit')),
+      el.scoreBox = h('div', { class: 'canvas-box ms-score-box' }, el.scoreCanvas, el.frozenBadge)),
     h('div', { class: 'ms-viz' },
-      h('div', { class: 'ms-viz-head' }, h('h3', {}, 'Spectrogram (audio output)'), h('span', { class: 'help inline' }, 'Measured frequencies of the sound over the last 10 s. Frequency axis is logarithmic; brighter = louder (dB).'), el.clearSg),
-      h('div', { class: 'canvas-box ms-sg-box' }, el.sgCanvas)));
+      h('div', { class: 'ms-viz-head' }, h('h3', {}, 'Spectrogram (audio output) ', info('spectrogram', 'the spectrogram')), el.clearSg),
+      h('p', { class: 'ms-read' }, 'The actual sound, measured: time left → right, pitch bottom → top (log scale), brighter = louder. The lowest bright line is the fundamental; each line above it is a harmonic.'),
+      el.sgBox = h('div', { class: 'canvas-box ms-sg-box' }, el.sgCanvas),
+      el.graphsSlot = h('div', {}),
+      explain(8)));
 
-  // C. Learn / Settings.
-  el.sens = h('input', { type: 'range', min: 0.5, max: 2, step: 0.05, value: 1, 'aria-label': 'Sensitivity', oninput: () => { inst.settings.sensitivity = Number(el.sens.value); render(); } });
-  el.sensOut = h('span', { class: 'mono' }, '1.00×');
-  el.invert = h('input', { type: 'checkbox', onchange: () => { inst.settings.invertTilt = el.invert.checked; render(); } });
-  el.recal = btn('Recalibrate', () => calibrate(), 'btn small');
-  el.calValues = h('div', { class: 'mono help' });
+  // C. Diagnostics and presentation help (explanations live next to their sections).
   el.waveCanvas = h('canvas', { class: 'plot' });
   el.specCanvas = h('canvas', { class: 'plot' });
   el.graphs = h('details', { class: 'ms-more' },
@@ -199,19 +234,10 @@ export function mount(root) {
       h('div', {}, h('h3', {}, 'Waveform (20 ms)'), h('div', { class: 'canvas-box ms-small-box' }, el.waveCanvas), help('Audio amplitude over time, measured at the output. More harmonics make a more jagged shape with the same repeat period.')),
       h('div', {}, h('h3', {}, 'Spectrum (now)'), h('div', { class: 'canvas-box ms-small-box' }, el.specCanvas), help('Audio frequency content at this moment. Dashed lines: expected components n × fundamental. White dots: measured peaks.'))));
   el.diag = h('pre', { class: 'ms-diag mono' });
+  el.graphsSlot.append(el.graphs);
   el.learn = h('section', { class: 'card ms-learn secondary' },
-    h('h2', {}, 'C · Learn and settings'),
-    h('details', { class: 'ms-more' }, h('summary', {}, 'How it works'),
-      h('p', { class: 'note' }, HONESTY),
-      h('dl', { class: 'ms-how' }, ...HOW.flatMap(([t, s, more]) => [h('dt', {}, t), h('dd', {}, s, ' ', h('details', { class: 'ms-detail' }, h('summary', {}, 'More detail'), h('p', {}, more)))]))),
-    h('details', { class: 'ms-more' }, h('summary', {}, 'Calibration and sensitivity'),
-      h('label', { class: 'row gap ms-vol' }, h('span', {}, 'Sensitivity'), el.sens, el.sensOut),
-      help('Higher sensitivity: smaller movements reach 100% intensity and lighter flicks count as accents. Use it if the sound stays quiet; lower it if the sound never goes silent.'),
-      h('label', { class: 'check' }, el.invert, ' Invert tilt (tilt away from you = higher)'),
-      help('Use if the pitch direction feels backwards.'),
-      h('div', { class: 'row gap' }, el.recal, help('Recalibrate after changing how you hold the phone.', 'inline')),
-      el.calValues),
-    el.graphs,
+    h('h2', {}, 'C · Diagnostics and presentation help'),
+    help('Explanations now sit next to the parts they explain (look for ⓘ and ?). This section keeps the technical details and the presenting checklist.'),
     h('details', { class: 'ms-more' }, h('summary', {}, 'Diagnostics'), help('Raw measurements, mapped values and connection details. Useful for troubleshooting; not needed to perform.'), el.diag),
     h('details', { class: 'ms-more' }, h('summary', {}, 'Presentation help'),
       h('h3', {}, 'Zoom setup'), h('ol', {}, ...ZOOM_STEPS.map((s) => h('li', {}, s))),
@@ -219,12 +245,6 @@ export function mount(root) {
       h('h3', {}, '30-second demonstration'),
       h('dl', { class: 'ac-perf' }, ...PERFORMANCE_30S.flatMap(([t, d]) => [h('dt', {}, t), h('dd', {}, d)])),
       help('Tilt and movement intensity are physically linked (tilting is itself a movement), so the demonstration separates them approximately, not perfectly.')));
-
-  // Demo Guide overlay.
-  el.guideText = h('div', {});
-  el.guide = h('div', { class: 'ms-guide', hidden: true, role: 'dialog', 'aria-label': 'Demo Guide' },
-    el.guideText,
-    h('div', { class: 'row gap' }, btn('← Back', () => guideStep(-1), 'btn small'), btn('Next →', () => guideStep(1), 'btn small primary'), btn('Close', () => closeGuide(), 'btn small')));
 
   const page = h('div', { class: 'motion-score' },
     h('div', { class: 'page-top ms-top' },
@@ -235,8 +255,7 @@ export function mount(root) {
     el.statusBar,
     el.setup,
     el.play,
-    el.learn,
-    el.guide);
+    el.learn);
   root.append(page);
 
   // ───────────────────────────── engines ─────────────────────────────
@@ -247,6 +266,72 @@ export function mount(root) {
   });
   const spectrum = new SpectrumView(el.specCanvas);
   const scope = new WaveScope(el.waveCanvas);
+
+  // ───────────────────────────── guided tour ─────────────────────────────
+  const track = (k) => () => {
+    const t = score.tracks && score.tracks[k];
+    if (!t) return el.scoreBox;
+    return {
+      scrollEl: el.scoreBox,
+      rect: () => {
+        const r = el.scoreCanvas.getBoundingClientRect();
+        return { left: r.left + t.x, top: r.top + t.y, width: t.w, height: t.h, right: r.left + t.x + t.w, bottom: r.top + t.y + t.h };
+      },
+    };
+  };
+  const tour = new Tour([
+    { id: 'status', target: () => el.statusBar, title: 'The status bar: is everything ready?',
+      body: 'Five separate lights. Phone = can the phone talk to the laptop. Sensors = is motion data arriving. Control = Armed means movement is allowed to make sound. Audio = is the laptop\'s sound engine on. On the right it says why it is silent, if it is.',
+      tryIt: 'Point at each light as you go through setup; they turn green one by one.' },
+    { id: 'setup', target: () => el.setup.querySelector('.ms-step.next') || el.setup, title: 'Setup: four steps, the next one is highlighted',
+      body: 'Scan the QR code with the phone, tap Enable Sensors on the phone, hold still while it calibrates (it does this by itself), then Start Audio and Arm. Pairing never makes sound on its own.',
+      tryIt: 'Follow whichever step says NEXT.' },
+    { id: 'panic', target: () => el.panic, title: 'Mute / Panic: the emergency stop',
+      body: 'Silences instantly and disarms. It stays silent, even if the phone keeps moving, until you press Start Audio again. The phone has the same button (Emergency Mute).',
+      tryIt: 'Know where it is before you start.' },
+    { id: 'fundamental', target: () => el.vF.root, title: 'Fundamental: the note you hear',
+      body: 'The fundamental is the base frequency used to build the sound, from 110 Hz (low A) to 880 Hz (high A). Tilting the top of the phone toward you raises it; away from you lowers it. The note name is the closest piano key.',
+      tryIt: 'Tilt slowly toward and away from you and watch the Hz number move.' },
+    { id: 'harmonics', target: () => el.vH.root, title: 'Harmonic components: how rich the tone is',
+      body: 'Harmonics are extra frequencies at 2×, 3×, 4×… the fundamental. 1 means a pure, flute-like tone; 12 means a bright, buzzy one. The pitch stays the same; only the tone color (timbre) changes. Moving harder adds harmonics.',
+      tryIt: 'Move gently, then energetically, and watch the count rise.' },
+    { id: 'expression', target: () => el.vE.root, title: 'Expression: how strong the sound is',
+      body: 'Expression comes from your movement: still = 0%, moving = up to 100%. Master Volume is separate; it is just the listening level you set by hand.',
+      tryIt: 'Hold still and watch Expression drop to 0%.' },
+    { id: 'mode', target: () => el.modeCtl, title: 'Flow or Accents: two ways to read the same movement',
+      body: 'Flow is like bowing a violin: the sound lasts as long as you keep moving and fades when you stop. Accents is like hitting a drum: smooth movement is silent, and each sharp jab plays one short note. The phone and sensors are identical; only the rule for turning movement into sound changes.',
+      tryIt: 'Switch to Accents and make three sharp flicks: three short notes.' },
+    { id: 'pitch', target: () => el.pitchCtl, title: 'Continuous or Pentatonic: sliding or stepping pitch',
+      body: 'Continuous lets the pitch slide smoothly through every in-between frequency, like a trombone or a siren. Pentatonic snaps to the nearest of five notes, A, C, D, E and G (A minor pentatonic), repeated in every octave. Those five notes all sound good together, so whatever you do sounds like a melody instead of a slide. The note only changes when you are clearly closer to the next one, so it does not flicker.',
+      tryIt: 'Choose Pentatonic and tilt slowly: the Hz jumps in steps, and the blue line in the Movement Score turns into a staircase.' },
+    { id: 'audio', target: () => el.audioCtl, title: 'Audio controls',
+      body: 'Start Audio turns on the laptop\'s sound engine. Stop Audio turns it off. Arm lets movement control the sound; Disarm pauses it. Master Volume is your listening level; keep it low at first.',
+      tryIt: 'Start Audio, then Arm.' },
+    { id: 'legend', target: () => el.legend, title: 'The three rules, in one place',
+      body: 'Tilt changes pitch. Movement intensity changes harmonic richness. Sharp movements trigger notes in Accents mode. The drawing shows which way to tilt (side view, you on the left). The ⓘ lines below explain the science if someone asks.',
+      tryIt: 'Open "ⓘ Orientation versus acceleration" if asked how the phone knows its tilt.' },
+    { id: 'score-pitch', target: track('p'), title: 'Movement Score, top track: pitch over time',
+      body: 'Read it like sheet music: time runs left to right, "now" is at the right edge. The blue line is the note: higher on the track = higher pitch. It is bright while sound is playing and faint while silent. The number on the right is the current value.',
+      tryIt: 'Tilt up and down and draw a wave with the blue line.' },
+    { id: 'score-move', target: track('i'), title: 'Middle track: how hard you are moving',
+      body: 'Green = movement intensity (0% when still, 100% when moving hard). In Flow, the white dashed line is the resulting Expression: it follows the green with a gentle rise and a slower fade, so short pauses do not cut the sound.',
+      tryIt: 'Shake, then freeze, and watch the green drop and the white dashes fade after it.' },
+    { id: 'score-harm', target: track('h'), title: 'Bottom track: harmonics, and accents',
+      body: 'Purple steps = how many harmonic components are in the tone (1 to 12). An orange vertical line through all tracks marks each accent hit in Accents mode, with a dot at the note it played.',
+      tryIt: 'In Accents, flick three times at different tilts: three orange lines at three heights.' },
+    { id: 'spectrogram', target: () => el.sgBox, title: 'Spectrogram: the sound itself',
+      body: 'This one is measured from the audio the laptop plays. Time runs left to right; pitch goes bottom to top; brighter = louder. The lowest bright line is the fundamental, and each line above it is a harmonic. Compare it with the Movement Score above: same moment, cause above, result here.',
+      tryIt: 'Move harder and watch more lines stack up; tilt and watch them all move up together.' },
+    { id: 'freeze', target: () => el.freezeBtn, title: 'Freeze Visual History',
+      body: 'Freezes the drawings so you can point at them while you talk. The sound and the safety checks keep running.',
+      tryIt: 'Freeze after a short performance and explain the picture.' },
+    { id: 'present', target: () => el.presentBtn, title: 'Presentation Mode',
+      body: 'Hides setup and technical sections and makes the live values and graphs bigger for screen sharing. Status and Mute / Panic stay visible. Press Esc to leave it.',
+      tryIt: 'Turn it on before sharing your screen in Zoom.' },
+    { id: 'finish', target: () => el.armBtn2, title: 'Finish: Disarm (or Panic)',
+      body: 'Disarm pauses movement control and fades the sound out. Mute / Panic is the instant version. That\'s the whole instrument: this movement changes this parameter, and you can see it here and hear it.',
+      tryIt: 'Press Disarm to end the demo.' },
+  ], { label: 'Demo Guide' });
 
   const host = new SessionHost({
     onState: (state, detail) => {
@@ -469,31 +554,6 @@ export function mount(root) {
     document.body.classList.toggle('presentation', st.presentation);
     page.classList.toggle('ms-present', st.presentation);
     render();
-  }
-
-  function openGuide() {
-    st.guideStep = 0;
-    renderGuide();
-  }
-
-  function guideStep(d) {
-    st.guideStep = Math.max(0, Math.min(DEMO_GUIDE.length - 1, st.guideStep + d));
-    renderGuide();
-  }
-
-  function closeGuide() {
-    st.guideStep = -1;
-    renderGuide();
-  }
-
-  function renderGuide() {
-    el.guide.hidden = st.guideStep < 0;
-    if (st.guideStep < 0) return;
-    const [t, d] = DEMO_GUIDE[st.guideStep];
-    el.guideText.replaceChildren(
-      h('div', { class: 'ms-guide-count' }, `Demo Guide · step ${st.guideStep + 1} of ${DEMO_GUIDE.length}`),
-      h('div', { class: 'ms-guide-title' }, t),
-      h('div', { class: 'ms-guide-body' }, d));
   }
 
   async function copyUrl() {
@@ -759,7 +819,6 @@ export function mount(root) {
     el.pairState.className = `ms-pair-state ${st.conn}`;
     el.calBtn.disabled = !(phone && st.conn === 'connected' && inst.phoneSensors === 'active') || inst.calib.state === 'running';
     el.calBtn.textContent = inst.calib.state === 'done' && phone ? 'Recalibrate' : 'Calibrate';
-    el.recal.disabled = el.calBtn.disabled;
     el.calText.textContent = phone ? inst.calib.text : '';
     el.calText.className = `ms-cal-text ${inst.calib.state}`;
     const armLabel = inst.armed ? 'Disarm' : 'Arm';
@@ -789,7 +848,8 @@ export function mount(root) {
     el.vMode.s.textContent = inst.pitchMode === 'continuous' ? 'Continuous pitch' : 'Pentatonic pitch';
     el.modeFlow.setAttribute('aria-pressed', String(inst.mode === 'flow'));
     el.modeAcc.setAttribute('aria-pressed', String(inst.mode === 'accents'));
-    el.modeText.textContent = MODE_TEXT[inst.mode];
+    el.flowCard.classList.toggle('active', inst.mode === 'flow');
+    el.accCard.classList.toggle('active', inst.mode === 'accents');
     el.pCont.setAttribute('aria-pressed', String(inst.pitchMode === 'continuous'));
     el.pPent.setAttribute('aria-pressed', String(inst.pitchMode === 'pentatonic'));
     el.freezeBtn.textContent = st.frozen ? '▶ Unfreeze Visual History' : '❄ Freeze Visual History';
@@ -863,6 +923,7 @@ export function mount(root) {
       cancelAnimationFrame(raf);
       clearInterval(ctlTimer);
       stopDemo();
+      tour.close();
       for (const d of disposers) d();
       host.close();
       synth.close();
