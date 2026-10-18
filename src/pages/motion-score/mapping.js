@@ -8,13 +8,15 @@ export const F_MIN = 110; // A2
 export const F_MAX = 880; // A5, three octaves higher
 export const H_MIN = 1;
 export const H_MAX = 12;
-export const TILT_RANGE = 35; // degrees either side of neutral
+export const TILT_RANGE = 35; // degrees either side of neutral (forward/back → pitch)
+export const SIDE_RANGE = 30; // default degrees either side of neutral (sideways → richness)
 
 export const DEFAULTS = Object.freeze({
   sensitivity: 1, // 0.5 … 2
   invertTilt: false,
   intensityRange: 5, // m/s² above the noise floor that counts as "full" movement
   jerkThreshold: 120, // m/s³, minimum accent threshold at sensitivity 1
+  sideRange: SIDE_RANGE, // degrees of sideways lean from neutral to minimum/maximum richness
 });
 
 export const ACCENT_COOLDOWN_MS = 300;
@@ -101,6 +103,65 @@ export function harmonicAmplitudes(count, f0, nyquist) {
   return { amps: amps.map((a) => a / sum), audible: amps.length };
 }
 
+// ───────────── harmonic richness (Tilt instrument mapping) ─────────────
+/**
+ * Sideways lean relative to neutral → richness 0..1. Neutral = 0.5 (medium);
+ * leaning left by `range` degrees → 0 (pure sine); right → 1 (all 12).
+ */
+export function sideToRichness(sideRel, range = SIDE_RANGE) {
+  if (!Number.isFinite(sideRel)) return 0.5;
+  return clamp01(0.5 + sideRel / (2 * range));
+}
+
+/** Continuous "harmonic position" 1..12 shown to the user. */
+export const richnessToPosition = (r) => 1 + clamp01(r) * (H_MAX - 1);
+
+/**
+ * How much of each harmonic is switched on (0..1), for richness 0..1.
+ * The fundamental is always fully on. Harmonic n fades in smoothly while the
+ * position 1 + 11·richness moves from n − 1 to n, so higher harmonics enter
+ * one after another instead of switching abruptly.
+ */
+export function richnessWeights(r) {
+  const pos = richnessToPosition(r);
+  const w = [];
+  for (let n = 1; n <= H_MAX; n++) w.push(n === 1 ? 1 : clamp01(pos - (n - 1)));
+  return w;
+}
+
+/** Legacy mapping: harmonics 1..count fully on, the rest off. */
+export function countWeights(count) {
+  return Array.from({ length: H_MAX }, (_, i) => (i < count ? 1 : 0));
+}
+
+/** Peak of Σ aₙ sin(2π n t) over one period (all sines start at phase 0). */
+export function waveformPeak(amps, samples = 2048) {
+  let peak = 0;
+  for (let k = 0; k < samples; k++) {
+    const t = (2 * Math.PI * k) / samples;
+    let v = 0;
+    for (let i = 0; i < amps.length; i++) if (amps[i]) v += amps[i] * Math.sin((i + 1) * t);
+    if (Math.abs(v) > peak) peak = Math.abs(v);
+  }
+  return peak;
+}
+
+/**
+ * The recipe and what is actually sent to the oscillators.
+ *  recipe[n]  = weight × 1/n   (the 1/n starting recipe, faded by richness)
+ *  output[n]  = recipe[n] × norm
+ * Harmonics at or above Nyquist get 0. norm = 1 / (peak of the summed
+ * waveform), so the mixture's peak is exactly 1 at full expression: it can
+ * never clip, and the level stays similar as harmonics are added (equal
+ * PERCEIVED loudness is not claimed).
+ */
+export function harmonicMix(weights, f0, nyquist) {
+  const recipe = weights.map((w, i) => ((i + 1) * f0 < nyquist ? w / (i + 1) : 0));
+  const peak = waveformPeak(recipe);
+  const norm = peak > 0 ? 1 / peak : 0;
+  return { recipe, output: recipe.map((a) => a * norm), norm, peak };
+}
+
 // ───────────── movement intensity ─────────────
 /**
  * Smoothed linear-acceleration magnitude (m/s²) → 0..1. Values up to the
@@ -170,7 +231,7 @@ export class AccentDetector {
 }
 
 // ───────────── calibration ─────────────
-export const NO_CAL = Object.freeze({ done: false, neutral: 0, noise: 0.15, jerkNoise: 20, screen: 0 });
+export const NO_CAL = Object.freeze({ done: false, neutral: 0, noise: 0.15, jerkNoise: 20, neutralSide: 0, sideAvailable: false, screen: 0 });
 
 /** Average of angles (handles wrap-around, e.g. 179° and −179° → 180°). */
 export function circularMeanDeg(angles) {
@@ -203,5 +264,16 @@ export function calibrateFromSamples(samples) {
   if (noise > 2) return { error: 'There was too much movement to measure stillness. Rest your arm and try again.' };
   const jerks = good.map((s) => s.jerk).filter(Number.isFinite);
   const jerkNoise = jerks.length ? percentile(jerks, 90) : NO_CAL.jerkNoise;
-  return { done: true, neutral, noise, jerkNoise, screen: good[good.length - 1].screen ?? 0 };
+  // Sideways neutral, only if the phone reported sideways lean throughout.
+  const sides = good.map((s) => s.side).filter(Number.isFinite);
+  let neutralSide = 0;
+  let sideAvailable = false;
+  if (sides.length >= good.length * 0.8) {
+    neutralSide = sides.reduce((a, b) => a + b, 0) / sides.length;
+    if (Math.max(...sides.map((v) => Math.abs(v - neutralSide))) > 15) {
+      return { error: 'The phone leaned sideways too much. Hold it still for the whole countdown and try again.' };
+    }
+    sideAvailable = true;
+  }
+  return { done: true, neutral, noise, jerkNoise, neutralSide, sideAvailable, screen: good[good.length - 1].screen ?? 0 };
 }

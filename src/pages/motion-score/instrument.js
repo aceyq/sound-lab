@@ -9,7 +9,10 @@
 
 import * as M from './mapping.js';
 
-export const DEMO_CAL = Object.freeze({ done: true, neutral: 0, noise: 0.1, jerkNoise: 10, screen: 0, demo: true });
+export const DEMO_CAL = Object.freeze({ done: true, neutral: 0, noise: 0.1, jerkNoise: 10, neutralSide: 0, sideAvailable: true, screen: 0, demo: true });
+export const DEFAULT_LOCK_HZ = 200;
+export const LOCK_MIN_HZ = 50;
+export const LOCK_MAX_HZ = 1000;
 const CAL_READY_MS = 1000; // "get ready" before measuring
 const CAL_MEASURE_MS = 2000; // measuring stillness
 
@@ -17,6 +20,15 @@ export class Instrument {
   constructor() {
     this.settings = { ...M.DEFAULTS };
     this.mode = 'flow'; // flow | accents
+    // Which movement shapes the tone: 'tilt' = sideways lean → harmonic
+    // richness (pitch and timbre independent); 'intensity' = the original
+    // mapping (movement intensity → harmonic count and expression).
+    this.mapping = 'tilt';
+    // Flow expression: 'sustain' = steady level from the Expression slider;
+    // 'movement' = movement intensity (the original behavior).
+    this.exprSource = 'sustain';
+    this.exprLevel = 0.6;
+    this.lock = { on: false, hz: DEFAULT_LOCK_HZ };
     this.pitchMode = 'continuous'; // continuous | pentatonic
     this.source = 'none'; // none | phone | demo
     this.audioOn = false;
@@ -43,6 +55,9 @@ export class Instrument {
     this.f0 = 220;
     this.note = null;
     this.count = 1;
+    this.sideRel = null;
+    this.richness = 0.5;
+    this.weights = M.richnessWeights(0.5);
     this.expr = 0;
     this.rotated = false;
     this.detector.reset();
@@ -109,6 +124,38 @@ export class Instrument {
     if (!on) this.expr = 0;
   }
 
+  /** Switch mapping; each mapping has its own natural expression default. */
+  setMapping(mapping) {
+    if (mapping === this.mapping) return;
+    this.mapping = mapping;
+    this.exprSource = mapping === 'tilt' ? 'sustain' : 'movement';
+    this.expr = 0;
+    this.detector.reset();
+  }
+
+  setExprSource(src) {
+    this.exprSource = src;
+  }
+
+  setExprLevel(v) {
+    if (Number.isFinite(v)) this.exprLevel = Math.min(1, Math.max(0, v));
+  }
+
+  /** Pitch lock: hz is clamped to a sensible range; returns the value used. */
+  setLock(on, hz = this.lock.hz) {
+    const v = Number(hz);
+    this.lock = { on: !!on, hz: Number.isFinite(v) ? Math.min(LOCK_MAX_HZ, Math.max(LOCK_MIN_HZ, v)) : this.lock.hz };
+    if (this.lock.on) this.note = null;
+    return this.lock.hz;
+  }
+
+  /** Is the sideways-lean gesture actually available right now? */
+  get sideAvailable() {
+    if (this.source === 'demo') return true;
+    if (this.source !== 'phone' || !this.cal.done) return false;
+    return !!this.cal.sideAvailable && this.input !== null && Number.isFinite(this.input.side);
+  }
+
   setMode(mode) {
     this.mode = mode;
     this.expr = 0;
@@ -139,7 +186,7 @@ export class Instrument {
         this.detector.reset();
         this.calib = {
           state: 'done',
-          text: `Calibration complete. Neutral tilt set to your current angle; stillness noise ${r.noise.toFixed(2)} m/s².`,
+          text: `Calibration complete. Neutral forward/back tilt${r.sideAvailable ? ' and sideways lean' : ''} set to your current position; stillness noise ${r.noise.toFixed(2)} m/s².${r.sideAvailable ? '' : ' Sideways lean is not available on this phone, so harmonic richness stays at medium (use the Movement intensity mapping instead).'}`,
         };
       }
     }
@@ -161,7 +208,7 @@ export class Instrument {
     this.input = s;
 
     if (this.calib.state === 'running' && receiptMs - this.calib.t0 >= CAL_READY_MS) {
-      this.calib.samples.push({ tilt: s.tilt, lin: s.lin, jerk: s.jerk, screen: s.screen });
+      this.calib.samples.push({ tilt: s.tilt, side: s.side, lin: s.lin, jerk: s.jerk, screen: s.screen });
     }
     // Rotating the phone to a new screen orientation changes what "tilt"
     // means, so the old calibration no longer applies.
@@ -179,6 +226,10 @@ export class Instrument {
       const rel = M.relativeTilt(s.tilt, this.cal.neutral, this.settings.invertTilt);
       this.tiltRel = this.tiltRel === null ? rel : M.smooth(this.tiltRel, rel, dt, 0.08);
     }
+    if (Number.isFinite(s.side) && this.cal.done && this.cal.sideAvailable) {
+      const rel = s.side - this.cal.neutralSide;
+      this.sideRel = this.sideRel === null ? rel : M.smooth(this.sideRel, rel, dt, 0.1);
+    } else this.sideRel = null; // unavailable: richness holds at medium (see sideAvailable)
     this.intensity = M.intensityToUnit(s.lin, this.cal, this.settings);
     this.recentPeaks.push([s.t, this.intensity]);
     while (this.recentPeaks.length && this.recentPeaks[0][0] < s.t - 150) this.recentPeaks.shift();
@@ -188,8 +239,14 @@ export class Instrument {
       const fired = this.detector.update(s.t, s.jerk, this.cal, this.settings);
       if (fired && this.mode === 'accents' && this.soundAllowed(receiptMs).ok) {
         this._updatePitch();
-        const peak = Math.max(...this.recentPeaks.map((p) => p[1]));
-        this.count = M.stableHarmonicCount(M.unitToHarmonicValue(peak), null);
+        if (this.mapping === 'intensity') {
+          const peak = Math.max(...this.recentPeaks.map((p) => p[1]));
+          this.count = M.stableHarmonicCount(M.unitToHarmonicValue(peak), null);
+          this.weights = M.countWeights(this.count);
+        } else {
+          this.richness = M.sideToRichness(this.sideRel, this.settings.sideRange);
+          this.weights = M.richnessWeights(this.richness);
+        }
         this.hits++;
         accent = true;
       }
@@ -198,6 +255,13 @@ export class Instrument {
   }
 
   _updatePitch() {
+    // Pitch lock wins over tilt and over Pentatonic: the locked value is
+    // exactly what is shown and what is played.
+    if (this.lock.on) {
+      this.f0 = this.lock.hz;
+      this.note = null;
+      return;
+    }
     if (this.tiltRel === null) return;
     const fc = M.unitToPitch(M.tiltToUnit(this.tiltRel));
     if (this.pitchMode === 'pentatonic') {
@@ -233,19 +297,25 @@ export class Instrument {
     }
     const allowed = this.soundAllowed(now);
     if (this.input && this.cal.done) {
-      if (this.mode === 'flow') {
-        this._updatePitch();
-        this.hSmooth = M.smooth(this.hSmooth, this.intensity, dt, M.FLOW.harmonicTau);
-        this.count = M.stableHarmonicCount(M.unitToHarmonicValue(this.hSmooth), this.count);
+      this._updatePitch(); // in Accents: the pitch the NEXT note will use
+      if (this.mapping === 'intensity') {
+        if (this.mode === 'flow') {
+          this.hSmooth = M.smooth(this.hSmooth, this.intensity, dt, M.FLOW.harmonicTau);
+          this.count = M.stableHarmonicCount(M.unitToHarmonicValue(this.hSmooth), this.count);
+          this.weights = M.countWeights(this.count);
+        }
       } else {
-        this._updatePitch(); // pitch for the NEXT accent (shown live)
+        const target = M.sideToRichness(this.sideRel, this.settings.sideRange);
+        this.richness = M.smooth(this.richness, target, dt, 0.08);
+        if (this.mode === 'flow') this.weights = M.richnessWeights(this.richness);
       }
-    }
+    } else if (this.lock.on) this.f0 = this.lock.hz;
     if (this.mode === 'flow') {
-      const target = allowed.ok ? this.intensity : 0;
+      const level = this.exprSource === 'sustain' ? this.exprLevel : this.intensity;
+      const target = allowed.ok ? level : 0;
       this.expr = M.flowEnvelope(this.expr, target, dt);
       if (target === 0 && this.expr < 0.003) this.expr = 0;
     } else this.expr = 0;
-    return { allowed, f0: this.f0, count: this.count, expr: this.expr };
+    return { allowed, f0: this.f0, count: this.count, weights: this.weights, expr: this.expr };
   }
 }

@@ -7,7 +7,26 @@ import { SessionClient } from './connection.js';
 import { MotionFeatures, RateMeter } from './sensors.js';
 import { normalizeSessionId, normalizeToken, SAMPLE_RATE_HZ } from './protocol.js';
 
-const NO_EVENTS_MS = 2500; // no sensor values this long after enabling → unavailable
+const NO_EVENTS_MS = 2500;
+
+// Front and side view of how to hold and move the phone.
+const PHONE_FIGURE = `
+<svg viewBox="0 0 320 120" width="100%" role="img" aria-label="Side view: tilt the top toward you for higher pitch, away for lower. Front view: lean left for a purer tone, right for a richer tone.">
+  <text x="80" y="14" text-anchor="middle" fill="#9aa7b6" font-size="11">side view: pitch</text>
+  <rect x="74" y="34" width="12" height="54" rx="3" fill="none" stroke="#58d1ff" stroke-dasharray="3 3" transform="rotate(-25 80 88)"/>
+  <rect x="74" y="34" width="12" height="54" rx="3" fill="none" stroke="#58d1ff" stroke-dasharray="3 3" transform="rotate(25 80 88)"/>
+  <rect x="74" y="34" width="12" height="54" rx="3" fill="#58d1ff"/>
+  <text x="34" y="44" text-anchor="middle" fill="#f0f6fc" font-size="12">higher</text>
+  <text x="126" y="44" text-anchor="middle" fill="#f0f6fc" font-size="12">lower</text>
+  <text x="80" y="110" text-anchor="middle" fill="#9aa7b6" font-size="10">top toward / away from you</text>
+  <text x="240" y="14" text-anchor="middle" fill="#9aa7b6" font-size="11">front view: tone</text>
+  <rect x="231" y="34" width="18" height="54" rx="4" fill="none" stroke="#c297ff" stroke-dasharray="3 3" transform="rotate(-25 240 88)"/>
+  <rect x="231" y="34" width="18" height="54" rx="4" fill="none" stroke="#c297ff" stroke-dasharray="3 3" transform="rotate(25 240 88)"/>
+  <rect x="231" y="34" width="18" height="54" rx="4" fill="#c297ff"/>
+  <text x="192" y="44" text-anchor="middle" fill="#f0f6fc" font-size="12">purer</text>
+  <text x="290" y="44" text-anchor="middle" fill="#f0f6fc" font-size="12">richer</text>
+  <text x="240" y="110" text-anchor="middle" fill="#9aa7b6" font-size="10">lean left / right</text>
+</svg>`; // no sensor values this long after enabling → unavailable
 
 export function mount(root, params) {
   const disposers = [];
@@ -52,6 +71,19 @@ export function mount(root, params) {
   el.tiltText = h('span', { class: 'mono' }, '—');
   el.intBar = h('div', { class: 'pc-bar-fill' });
   el.intText = h('span', { class: 'mono' }, '—');
+  el.intLabel = h('span', {}, 'Movement');
+  el.sideBar = h('div', { class: 'pc-bar-fill' });
+  el.sideText = h('span', { class: 'mono' }, '—');
+  el.sideRow = h('div', {},
+    h('div', { class: 'pc-live-row' }, h('span', {}, 'Lean → harmonic richness'), el.sideText),
+    h('div', { class: 'pc-bar side' }, h('div', { class: 'pc-bar-mid' }), el.sideBar));
+  // Expression slider (Steady sustain); kept in sync with the laptop.
+  el.expr = h('input', { type: 'range', min: 0, max: 100, step: 1, value: 60, 'aria-label': 'Expression' });
+  el.exprOut = h('span', { class: 'mono' }, '60%');
+  el.exprBox = h('section', { class: 'pc-expr', hidden: true },
+    h('div', { class: 'pc-live-row' }, h('span', {}, 'Expression (sound strength)'), el.exprOut), el.expr,
+    h('div', { class: 'pc-small' }, 'Steady sustain: the tone keeps sounding at this level. The laptop\'s Master Volume is separate.'));
+  el.howTo = h('p', { class: 'pc-small' });
   el.hit = h('div', { class: 'pc-hit' }, 'Accent!');
   el.diag = h('div', { class: 'mono pc-diag' });
 
@@ -75,13 +107,16 @@ export function mount(root, params) {
       statusRow('Movement control', el.armed),
       statusRow('Laptop audio', el.audio)),
     h('section', { class: 'pc-live' },
-      h('div', { class: 'pc-live-row' }, h('span', {}, 'Tilt → pitch'), el.tiltText),
+      h('div', { class: 'pc-live-row' }, h('span', {}, 'Forward/back tilt → pitch'), el.tiltText),
       h('div', { class: 'pc-bar tilt' }, h('div', { class: 'pc-bar-mid' }), el.tiltBar),
-      h('div', { class: 'pc-live-row' }, h('span', {}, 'Movement → richness'), el.intText),
+      el.sideRow,
+      h('div', { class: 'pc-live-row' }, el.intLabel, el.intText),
       h('div', { class: 'pc-bar' }, el.intBar),
       el.hit),
     h('p', { class: 'pc-keep' }, 'Keep this page open and your phone unlocked.'),
-    h('p', { class: 'pc-small' }, 'Hold the phone upright in one hand, screen facing you. Tilt the top toward you for higher pitch, away from you for lower pitch.'),
+    el.exprBox,
+    el.howTo,
+    h('div', { class: 'pc-figure', html: PHONE_FIGURE }),
     h('details', { class: 'pc-help' },
       h('summary', {}, 'Troubleshooting'),
       h('ul', {},
@@ -155,7 +190,7 @@ export function mount(root, params) {
 
   function onOrientation(e) {
     orientRate.tick(performance.now());
-    features.onOrientation(e.timeStamp || performance.now(), e.beta);
+    features.onOrientation(e.timeStamp || performance.now(), e.beta, e.gamma);
   }
 
   async function enableSensors() {
@@ -224,6 +259,21 @@ export function mount(root, params) {
     sendStatus(); // tells the laptop to stop the sound when this page is hidden
     if (document.visibilityState === 'visible' && st.sensors !== 'off' && !st.wakeLock) requestWakeLock();
   });
+
+  // Expression slider: send changes to the laptop (throttled), and don't let
+  // incoming laptop updates fight the finger while it is dragging.
+  let draggingExpr = false;
+  let exprSendT = 0;
+  const sendExpr = (force) => {
+    const now = performance.now();
+    if (!force && now - exprSendT < 60) return;
+    exprSendT = now;
+    client.send({ type: 'expr', value: Number(el.expr.value) / 100 });
+  };
+  listen(el.expr, 'pointerdown', () => { draggingExpr = true; });
+  listen(window, 'pointerup', () => { if (draggingExpr) { draggingExpr = false; sendExpr(true); } });
+  listen(el.expr, 'input', () => { el.exprOut.textContent = `${el.expr.value}%`; sendExpr(false); });
+  listen(el.expr, 'change', () => sendExpr(true));
 
   // ───────────── sample loop (~25 Hz) ─────────────
   let lastSentEvents = 0;
@@ -320,7 +370,10 @@ export function mount(root, params) {
       action = () => command('arm');
     } else {
       step = 'Playing';
-      next = (L.audio === 'on' ? '' : 'Press Start Audio on the laptop to hear it. ') + (L.mode === 'accents' ? 'Accents: make a sharp movement to play a short note.' : 'Flow: keep moving to sustain sound. Hold still for silence.');
+      const flowText = L.mapping === 'tilt'
+        ? (L.exprSource === 'sustain' ? 'Tilt toward/away = pitch. Lean left/right = richness. The tone keeps sounding.' : 'Tilt = pitch, lean = richness; keep moving to sustain sound.')
+        : 'Flow: keep moving to sustain sound. Hold still for silence.';
+      next = (L.audio === 'on' ? '' : 'Press Start Audio on the laptop to hear it. ') + (L.mode === 'accents' ? 'Accents: make a sharp movement to play a short note.' : flowText);
       label = 'Disarm';
       action = () => command('disarm');
       armedStyle = true;
@@ -347,13 +400,33 @@ export function mount(root, params) {
       el.tiltBar.style.width = '0';
       el.tiltText.textContent = st.sensors === 'active' ? 'calibrate first' : '—';
     }
+    const tiltMap = !L || L.mapping === 'tilt';
+    el.sideRow.hidden = !tiltMap;
+    if (L && L.sideRel !== null && L.richness !== null) {
+      const u = Math.max(-1, Math.min(1, (L.richness - 0.5) * 2));
+      el.sideBar.style.left = u < 0 ? `${50 + u * 50}%` : '50%';
+      el.sideBar.style.width = `${Math.abs(u) * 50}%`;
+      el.sideText.textContent = `${Math.round(L.richness * 100)}% (${L.sideRel > 0 ? '+' : ''}${L.sideRel.toFixed(0)}°)`;
+    } else {
+      el.sideBar.style.width = '0';
+      el.sideText.textContent = L && !L.sideAvailable ? 'not available on this phone' : st.sensors === 'active' ? 'calibrate first' : '—';
+    }
+    el.intLabel.textContent = tiltMap ? 'Movement (only used by Movement expression)' : 'Movement → richness';
+    el.exprBox.hidden = !(L && L.mode === 'flow' && L.exprSource === 'sustain');
+    if (L && !draggingExpr) {
+      el.expr.value = Math.round(L.exprLevel * 100);
+      el.exprOut.textContent = `${Math.round(L.exprLevel * 100)}%`;
+    }
+    el.howTo.textContent = tiltMap
+      ? 'Hold the phone upright, screen facing you. Tilt the top toward you = higher pitch, away = lower. Lean it left or right like a steering wheel: left = purer tone, right = richer tone.' + (L && !L.sideAvailable ? ' This phone is not reporting sideways lean, so richness stays at medium.' : '')
+      : 'Hold the phone upright, screen facing you. Tilt the top toward you for higher pitch, away for lower. Move harder for a richer, stronger sound.';
     el.intBar.style.left = '0';
     el.intBar.style.width = `${Math.round((L ? L.intensity : 0) * 100)}%`;
     el.intText.textContent = L ? `${Math.round(L.intensity * 100)}%` : '—';
     el.diag.textContent = [
       `Session ${st.sessionId || '—'} · sent ${st.seq} samples · dropped ${client.dropped}`,
       `Motion events ${motionRate.rate(performance.now())}/s · orientation events ${orientRate.rate(performance.now())}/s`,
-      `Tilt source: ${features.tiltSrc || '—'} · intensity source: ${features.linSrc === 'estimated' ? 'gravity estimated (approximate)' : features.linSrc || '—'}`,
+      `Sideways lean: ${features.side === null ? 'not available' : features.side.toFixed(1) + '°'} · tilt source: ${features.tiltSrc || '—'} · intensity source: ${features.linSrc === 'estimated' ? 'gravity estimated (approximate)' : features.linSrc || '—'}`,
       st.wakeLockNote,
     ].join('\n');
     if (st.sensors === 'active') setVal(el.sensors, `Active (${motionRate.rate(performance.now())} readings/s)`, 'ok');

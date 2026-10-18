@@ -48,25 +48,30 @@ export class MovementScore {
     this.marks.push(tSec);
   }
 
-  render(nowSec, { frozen, mode }) {
+  /**
+   * mapping: 'tilt' (continuous richness trace) or 'intensity' (integer
+   * harmonic-count steps). exprSource labels where Expression comes from.
+   */
+  render(nowSec, { frozen, mode, mapping = 'tilt', exprSource = 'sustain' }) {
     const sf = this.surface;
     const ctx = sf.begin();
     const PAD = { l: 150, r: 132, t: 10, b: 34 };
     const W = sf.w - PAD.l - PAD.r;
     const H = sf.h - PAD.t - PAD.b;
-    const gap = 10;
-    const hP = Math.round((H - 2 * gap) * 0.48);
-    const hI = Math.round((H - 2 * gap) * 0.32);
-    const hH = H - 2 * gap - hP - hI;
-    const tracks = {
-      p: { y: PAD.t, h: hP },
-      i: { y: PAD.t + hP + gap, h: hI },
-      h: { y: PAD.t + hP + hI + 2 * gap, h: hH },
-    };
+    const gap = 8;
+    const avail = H - 3 * gap;
+    const sizes = { p: 0.34, r: 0.24, e: 0.21, m: 0.21 };
+    const tracks = {};
+    let y = PAD.t;
+    for (const k of ['p', 'r', 'e', 'm']) {
+      const h = Math.round(avail * sizes[k]);
+      tracks[k] = { y, h };
+      y += h + gap;
+    }
     const xOf = (t) => PAD.l + (1 - (nowSec - t) / HISTORY_SEC) * W;
-    ctx.font = '12px system-ui, sans-serif';
+    const tilt = mapping === 'tilt';
+    const exprLabel = mode === 'accents' ? 'source: note envelope' : exprSource === 'sustain' ? 'source: steady sustain' : 'source: movement';
 
-    // Track frames and labels.
     const label = (tr, text, sub, color) => {
       ctx.fillStyle = '#0f141b';
       ctx.fillRect(PAD.l, tr.y, W, tr.h);
@@ -79,48 +84,42 @@ export class MovementScore {
       ctx.fillText(text, 8, tr.y + 2);
       ctx.font = '12px system-ui, sans-serif';
       ctx.fillStyle = COLORS.muted;
-      ctx.fillText(sub, 8, tr.y + 19);
+      ctx.fillText(sub, 8, tr.y + 18);
     };
-    label(tracks.p, 'Pitch', 'from tilt', C.pitch);
-    label(tracks.i, 'Movement', 'how hard you move', C.intensity);
-    label(tracks.h, 'Harmonics', 'how rich the tone', C.harm);
+    label(tracks.p, 'Pitch', 'from forward/back tilt', C.pitch);
+    label(tracks.r, tilt ? 'Richness' : 'Harmonics', tilt ? 'from sideways lean' : 'from movement', C.harm);
+    label(tracks.e, 'Expression', exprLabel, C.expr);
+    label(tracks.m, 'Movement', 'how hard you move', C.intensity);
     // Track positions (CSS px inside the canvas) for the guided tour.
     this.tracks = {};
     for (const [k, tr] of Object.entries(tracks)) this.tracks[k] = { x: 0, y: tr.y, w: sf.w, h: tr.h };
 
-    // Axis ticks.
     const yP = (f) => tracks.p.y + (1 - pitchToUnit(f)) * tracks.p.h;
-    const yI = (v) => tracks.i.y + (1 - v) * tracks.i.h;
-    const yH = (n) => tracks.h.y + (1 - (n - 1) / (H_MAX - 1)) * tracks.h.h;
+    const yR = (n) => tracks.r.y + 3 + (1 - (n - 1) / (H_MAX - 1)) * (tracks.r.h - 6);
+    const yU = (tr) => (v) => tr.y + 2 + (1 - v) * (tr.h - 4);
+    const yE = yU(tracks.e);
+    const yM = yU(tracks.m);
+    const tick = (tr, yy, text) => {
+      const ly = Math.round(yy) + 0.5;
+      ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+      ctx.beginPath(); ctx.moveTo(PAD.l, ly); ctx.lineTo(PAD.l + W, ly); ctx.stroke();
+      ctx.fillStyle = COLORS.text;
+      ctx.fillText(text, PAD.l - 5, Math.min(Math.max(ly, tr.y + 7), tr.y + tr.h - 7));
+    };
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
-    for (const f of [110, 220, 440, 880]) {
-      const y = Math.round(yP(f)) + 0.5;
-      ctx.strokeStyle = 'rgba(255,255,255,0.07)';
-      ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(PAD.l + W, y); ctx.stroke();
-      ctx.fillStyle = COLORS.text;
-      ctx.fillText(`${f} Hz ${noteName(f).name}`, PAD.l - 5, Math.min(Math.max(y, tracks.p.y + 7), tracks.p.y + tracks.p.h - 7));
-    }
-    for (const v of [0, 0.5, 1]) {
-      const y = Math.round(yI(v)) + 0.5;
-      ctx.strokeStyle = 'rgba(255,255,255,0.07)';
-      ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(PAD.l + W, y); ctx.stroke();
-      ctx.fillStyle = COLORS.text;
-      ctx.fillText(`${v * 100}%`, PAD.l - 5, Math.min(Math.max(y, tracks.i.y + 7), tracks.i.y + tracks.i.h - 7));
-    }
-    for (const n of [1, 6, 12]) {
-      ctx.fillStyle = COLORS.text;
-      ctx.fillText(String(n), PAD.l - 5, Math.min(Math.max(yH(n), tracks.h.y + 7), tracks.h.y + tracks.h.h - 7));
-    }
+    for (const f of [110, 220, 440, 880]) tick(tracks.p, yP(f), `${f} Hz ${noteName(f).name}`);
+    for (const n of [1, 6, 12]) tick(tracks.r, yR(n), tilt ? `H${n}` : String(n));
+    for (const v of [0, 1]) tick(tracks.e, yE(v), `${v * 100}%`);
+    for (const v of [0, 1]) tick(tracks.m, yM(v), `${v * 100}%`);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     for (let s = 0; s <= HISTORY_SEC; s += 2) {
-      const x = PAD.l + (1 - s / HISTORY_SEC) * W;
       ctx.fillStyle = COLORS.text;
-      ctx.fillText(s === 0 ? 'now' : `−${s} s`, x, PAD.t + H + 6);
+      ctx.fillText(s === 0 ? 'now' : `−${s} s`, PAD.l + (1 - s / HISTORY_SEC) * W, PAD.t + H + 6);
     }
     ctx.fillStyle = COLORS.muted;
-    ctx.fillText('Time (newest on the right) · sensor-derived control values, not audio', PAD.l + W / 2, PAD.t + H + 20);
+    ctx.fillText('Time (newest on the right) · CONTROL HISTORY from the phone, not measured audio', PAD.l + W / 2, PAD.t + H + 20);
 
     ctx.save();
     ctx.beginPath();
@@ -136,53 +135,49 @@ export class MovementScore {
       ctx.strokeStyle = b.sound ? C.pitch : 'rgba(88,209,255,0.28)';
       ctx.beginPath(); ctx.moveTo(xOf(a.t), yP(a.f0)); ctx.lineTo(xOf(b.t), yP(b.f0)); ctx.stroke();
     }
-    // Movement intensity: filled area. Expression (Flow): white line.
-    ctx.fillStyle = 'rgba(63,185,80,0.35)';
-    ctx.strokeStyle = C.intensity;
-    ctx.lineWidth = 2;
-    let seg = [];
-    const flushSeg = () => {
-      if (seg.length > 1) {
-        ctx.beginPath();
-        ctx.moveTo(xOf(seg[0].t), yI(0));
-        for (const p of seg) ctx.lineTo(xOf(p.t), yI(p.inten));
-        ctx.lineTo(xOf(seg[seg.length - 1].t), yI(0));
-        ctx.closePath();
-        ctx.fill();
-        ctx.beginPath();
-        seg.forEach((p, i) => (i ? ctx.lineTo(xOf(p.t), yI(p.inten)) : ctx.moveTo(xOf(p.t), yI(p.inten))));
-        ctx.stroke();
+    // Filled area traces for 0..1 values.
+    const area = (key, yFn, fill, stroke) => {
+      ctx.fillStyle = fill;
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = 2;
+      let seg = [];
+      const flush = () => {
+        if (seg.length > 1) {
+          ctx.beginPath();
+          ctx.moveTo(xOf(seg[0].t), yFn(0));
+          for (const p of seg) ctx.lineTo(xOf(p.t), yFn(p[key]));
+          ctx.lineTo(xOf(seg[seg.length - 1].t), yFn(0));
+          ctx.closePath();
+          ctx.fill();
+          ctx.beginPath();
+          seg.forEach((p, i) => (i ? ctx.lineTo(xOf(p.t), yFn(p[key])) : ctx.moveTo(xOf(p.t), yFn(p[key]))));
+          ctx.stroke();
+        }
+        seg = [];
+      };
+      for (const p of pts) {
+        if (p[key] == null) { flush(); continue; }
+        if (seg.length && p.t - seg[seg.length - 1].t > 0.5) flush();
+        seg.push(p);
       }
-      seg = [];
+      flush();
     };
-    for (const p of pts) {
-      if (p.inten == null) { flushSeg(); continue; }
-      if (seg.length && p.t - seg[seg.length - 1].t > 0.5) flushSeg();
-      seg.push(p);
-    }
-    flushSeg();
-    if (mode === 'flow') {
-      ctx.strokeStyle = C.expr;
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([5, 4]);
-      ctx.beginPath();
-      pts.forEach((p, i) => (i ? ctx.lineTo(xOf(p.t), yI(p.expr)) : ctx.moveTo(xOf(p.t), yI(p.expr))));
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-    // Harmonic count: step line.
+    area('expr', yE, 'rgba(240,246,252,0.18)', C.expr);
+    area('inten', yM, 'rgba(63,185,80,0.35)', C.intensity);
+    // Richness: continuous trace (Tilt instrument) or integer steps (legacy).
     ctx.strokeStyle = C.harm;
     ctx.lineWidth = 2.5;
     ctx.beginPath();
     let started = false;
     for (let i = 0; i < pts.length; i++) {
       const p = pts[i];
-      if (p.count == null) { started = false; continue; }
+      if (p.rich == null) { started = false; continue; }
       const x = xOf(p.t);
-      const y = yH(p.count);
-      if (!started) { ctx.moveTo(x, y); started = true; } else {
-        ctx.lineTo(x, yH(pts[i - 1].count ?? p.count));
-        ctx.lineTo(x, y);
+      const yy = yR(p.rich);
+      if (!started) { ctx.moveTo(x, yy); started = true; } else if (tilt) ctx.lineTo(x, yy);
+      else {
+        ctx.lineTo(x, yR(pts[i - 1].rich ?? p.rich));
+        ctx.lineTo(x, yy);
       }
     }
     ctx.stroke();
@@ -212,19 +207,16 @@ export class MovementScore {
       ctx.textBaseline = 'top';
       ctx.fillStyle = color;
       ctx.font = '700 16px system-ui, sans-serif';
-      ctx.fillText(big, rx, tr.y + 4);
+      ctx.fillText(big, rx, tr.y + 2);
       ctx.font = '12px system-ui, sans-serif';
       ctx.fillStyle = COLORS.muted;
-      if (small) ctx.fillText(small, rx, tr.y + 24);
+      if (small) ctx.fillText(small, rx, tr.y + 21);
     };
-    ctx.fillStyle = COLORS.muted;
-    ctx.font = '11px system-ui, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'bottom';
     if (last) {
       readout(tracks.p, last.f0 == null ? '—' : `${Math.round(last.f0)} Hz`, last.f0 == null ? 'not calibrated' : `${noteName(last.f0).name}${last.sound ? ' · sounding' : ' · silent'}`, C.pitch);
-      readout(tracks.i, last.inten == null ? '—' : `${Math.round(last.inten * 100)}%`, mode === 'flow' ? `expression ${Math.round((last.expr || 0) * 100)}%` : 'sharp hit = note', C.intensity);
-      readout(tracks.h, last.count == null ? '—' : String(last.count), 'components', C.harm);
+      readout(tracks.r, last.rich == null ? '—' : tilt ? `${Math.round(((last.rich - 1) / (H_MAX - 1)) * 100)}%` : `${last.rich} of 12`, tilt ? `up to ≈H${last.rich == null ? '—' : last.rich.toFixed(1)}` : 'components', C.harm);
+      readout(tracks.e, `${Math.round((last.expr || 0) * 100)}%`, exprLabel.replace('source: ', ''), C.expr);
+      readout(tracks.m, last.inten == null ? '—' : `${Math.round(last.inten * 100)}%`, mode === 'accents' ? 'sharp hit = note' : '', C.intensity);
     }
     ctx.font = '12px system-ui, sans-serif';
     if (frozen) {

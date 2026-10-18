@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
 import * as P from '../src/pages/motion-score/protocol.js';
-import { MotionFeatures, wrapDeg } from '../src/pages/motion-score/sensors.js';
+import { MotionFeatures, wrapDeg, sideLean } from '../src/pages/motion-score/sensors.js';
 import * as M from '../src/pages/motion-score/mapping.js';
 import { Instrument } from '../src/pages/motion-score/instrument.js';
 
@@ -178,13 +178,15 @@ function phoneReady() {
   inst.setPhoneStatus({ sensors: 'active', hidden: false });
   let now = 0;
   let seq = 0;
+  let side = 4; // sideways lean reported by the phone (degrees)
   const feed = (tilt, lin, jerk = 5, screen = 0) => {
     now += 40;
-    return inst.ingest({ type: 'sample', seq: seq++, t: now + 5000, tilt, tiltSrc: 'orientation', lin, linSrc: 'sensor', jerk, screen, rate: 60 }, now);
+    return inst.ingest({ type: 'sample', seq: seq++, t: now + 5000, tilt, tiltSrc: 'orientation', side, lin, linSrc: 'sensor', jerk, screen, rate: 60 }, now);
   };
   inst.startCalibration(now);
   for (let i = 0; i < 90; i++) { feed(60, 0.05); inst.tick(now, 0.04); }
-  return { inst, feed, at: () => now, advance: (ms) => { now += ms; } };
+  const setSide = (v) => { side = v; };
+  return { inst, feed, setSide, at: () => now, advance: (ms) => { now += ms; } };
 }
 
 test('pairing alone never makes sound; needs audio and Arm', () => {
@@ -198,8 +200,10 @@ test('pairing alone never makes sound; needs audio and Arm', () => {
   assert.ok(inst.soundAllowed(at()).ok);
 });
 
-test('Flow: stillness fades to silence, movement raises expression and harmonics', () => {
+test('Movement intensity mapping (legacy): stillness fades to silence, movement raises expression and harmonics', () => {
   const { inst, feed, at } = phoneReady();
+  inst.setMapping('intensity');
+  assert.equal(inst.exprSource, 'movement');
   inst.setAudio(true);
   inst.arm();
   for (let i = 0; i < 50; i++) { feed(60, 3); inst.tick(at(), 0.04); }
@@ -257,8 +261,9 @@ test('rotation invalidates calibration and disarms', () => {
   assert.match(inst.arm(), /rotated/);
 });
 
-test('Accents: a sharp hit triggers once, samples pitch and richness; cooldown holds', () => {
+test('Accents (legacy mapping): a sharp hit triggers once, samples pitch and richness; cooldown holds', () => {
   const { inst, feed, at } = phoneReady();
+  inst.setMapping('intensity');
   inst.setAudio(true);
   inst.setMode('accents');
   inst.arm();
@@ -280,4 +285,161 @@ test('switching input source disarms and clears input', () => {
   assert.equal(inst.armed, false);
   assert.equal(inst.input, null);
   assert.equal(inst.calib.state, 'done'); // demo uses a preset
+});
+
+// ───────────── Tilt instrument: independent pitch and timbre ─────────────
+test('sideways lean: level = 0, right edge down = positive, robust when upright', () => {
+  close(sideLean(0, 0), 0);
+  close(sideLean(0, 20), 20); // flat phone: lean = gamma
+  assert.ok(sideLean(60, 30) > 0 && sideLean(60, -30) < 0);
+  close(sideLean(90, 45), 0, 1e-9); // upright and degenerate gamma → no fake lean
+  assert.ok(Math.abs(sideLean(89.9, 80)) < 1);
+});
+
+test('phone features include sideways lean only when orientation exists', () => {
+  const f = new MotionFeatures();
+  f.onMotion(0, { x: 0, y: 0, z: 0 }, null);
+  f.onOrientation(0, 30, 10);
+  assert.ok(Math.abs(f.take().side - sideLean(30, 10)) < 0.01);
+  const g = new MotionFeatures();
+  for (let i = 0; i < 100; i++) g.onMotion(i * 16, null, { x: 0, y: 9.8, z: 0 });
+  assert.equal(g.take().side, null); // gravity-only fallback: no sideways lean
+});
+
+test('protocol: sideways lean and expression messages are validated', () => {
+  assert.ok(P.validatePhoneMessage({ ...good, side: -12.5 }).ok);
+  assert.equal(P.validatePhoneMessage({ ...good, side: 120 }).ok, false);
+  assert.equal(P.validatePhoneMessage({ ...good, side: 'left' }).ok, false);
+  assert.equal(P.validatePhoneMessage(good).msg.side, null); // older phones: treated as unavailable
+  assert.ok(P.validatePhoneMessage({ type: 'expr', value: 0.4 }).ok);
+  for (const v of [-0.1, 1.5, NaN, '0.5']) assert.equal(P.validatePhoneMessage({ type: 'expr', value: v }).ok, false);
+});
+
+test('richness → weights: minimum = only the fundamental, maximum = all 12, smooth in between', () => {
+  assert.deepEqual(M.richnessWeights(0), [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  assert.deepEqual(M.richnessWeights(1), new Array(12).fill(1));
+  close(M.sideToRichness(0), 0.5);
+  close(M.sideToRichness(-30), 0);
+  close(M.sideToRichness(30), 1);
+  close(M.sideToRichness(-90), 0);
+  close(M.sideToRichness(null), 0.5); // unavailable → medium
+  // Continuity: a tiny change in richness never moves any weight much.
+  let prev = M.richnessWeights(0);
+  for (let r = 0.001; r <= 1; r += 0.001) {
+    const w = M.richnessWeights(r);
+    for (let i = 0; i < 12; i++) assert.ok(Math.abs(w[i] - prev[i]) < 0.02, `jump at r=${r}`);
+    assert.equal(w[0], 1); // fundamental always present
+    prev = w;
+  }
+  // Harmonics enter in order (lower first).
+  const mid = M.richnessWeights(0.3);
+  for (let i = 1; i < 11; i++) assert.ok(mid[i] >= mid[i + 1]);
+});
+
+test('harmonic mix: recipe 1/n, peak-normalized (no clipping), Nyquist excluded', () => {
+  const full = M.harmonicMix(M.richnessWeights(1), 200, 24000);
+  close(full.recipe[1] / full.recipe[0], 1 / 2);
+  close(full.recipe[3] / full.recipe[0], 1 / 4);
+  close(M.waveformPeak(full.output), 1, 1e-3); // summed wave peaks at 1
+  const pure = M.harmonicMix(M.richnessWeights(0), 200, 24000);
+  close(pure.norm, 1, 1e-6);
+  assert.ok(pure.output.slice(1).every((a) => a === 0));
+  const hi = M.harmonicMix(M.richnessWeights(1), 880, 4000); // 5·880 ≥ 4000
+  assert.equal(hi.recipe.filter((a) => a > 0).length, 4);
+  // Level changes only moderately from pure sine to all 12 (RMS within ~3 dB).
+  const rms = (a) => Math.sqrt(a.reduce((x, y) => x + y * y, 0) / 2);
+  const db = 20 * Math.log10(rms(full.output) / rms(pure.output));
+  assert.ok(db > -3.5 && db < 0.5, `${db.toFixed(2)} dB`);
+});
+
+test('Tilt instrument: sideways lean changes richness, forward/back tilt changes pitch, independently', () => {
+  const { inst, feed, setSide, at } = phoneReady();
+  assert.equal(inst.mapping, 'tilt');
+  assert.ok(inst.cal.sideAvailable);
+  close(inst.cal.neutralSide, 4, 1e-6);
+  inst.setAudio(true);
+  inst.arm();
+  setSide(4 - 30); // lean fully left
+  for (let i = 0; i < 40; i++) { feed(60, 0.05); inst.tick(at(), 0.04); }
+  const f0a = inst.f0;
+  assert.ok(inst.richness < 0.05, `${inst.richness}`);
+  assert.ok(inst.weights.slice(1).every((w) => w < 0.6));
+  setSide(4 + 30); // lean fully right
+  for (let i = 0; i < 40; i++) { feed(60, 0.05); inst.tick(at(), 0.04); }
+  assert.ok(inst.richness > 0.95);
+  close(inst.f0, f0a, 2); // pitch unchanged by lean
+  const r = inst.richness;
+  for (let i = 0; i < 40; i++) { feed(80, 0.05); inst.tick(at(), 0.04); } // tilt changes pitch only
+  assert.ok(inst.f0 > f0a * 1.5);
+  close(inst.richness, r, 0.02);
+});
+
+test('Steady sustain: expression follows the slider, not movement; safety still applies', () => {
+  const { inst, feed, at, advance } = phoneReady();
+  assert.equal(inst.exprSource, 'sustain');
+  inst.setAudio(true);
+  inst.arm();
+  inst.setExprLevel(0.4);
+  for (let i = 0; i < 60; i++) { feed(60, 0.02); inst.tick(at(), 0.04); } // completely still
+  close(inst.expr, 0.4, 0.01);
+  for (let i = 0; i < 60; i++) { feed(60, 5); inst.tick(at(), 0.04); } // moving hard
+  close(inst.expr, 0.4, 0.01);
+  advance(700); // phone stops sending: stale
+  for (let i = 0; i < 40; i++) { advance(40); inst.tick(at(), 0.04); }
+  assert.ok(inst.expr < 0.01, 'stale input must silence steady sustain');
+  advance(3000);
+  inst.tick(at(), 0.04);
+  assert.equal(inst.armed, false);
+});
+
+test('Pitch lock: holds f0 exactly (also over Pentatonic) while richness still changes', () => {
+  const { inst, feed, setSide, at } = phoneReady();
+  inst.setAudio(true);
+  inst.arm();
+  assert.equal(inst.setLock(true, 200), 200);
+  inst.pitchMode = 'pentatonic';
+  for (const [tilt, side] of [[30, -26], [90, -26], [60, 34], [40, 34]]) {
+    setSide(side);
+    for (let i = 0; i < 30; i++) { feed(tilt, 0.05); inst.tick(at(), 0.04); }
+    assert.equal(inst.f0, 200);
+  }
+  assert.ok(inst.richness > 0.9);
+  assert.equal(inst.setLock(true, 5), 50); // clamped
+  inst.setLock(false);
+  for (let i = 0; i < 30; i++) { feed(80, 0.05); inst.tick(at(), 0.04); }
+  assert.notEqual(inst.f0, 50);
+});
+
+test('missing sideways data: richness held at medium and reported unavailable', () => {
+  const inst = new Instrument();
+  inst.setSource('phone');
+  inst.setConnected(true);
+  inst.setPhoneStatus({ sensors: 'active', hidden: false });
+  let now = 0;
+  let seq = 0;
+  const feed = () => { now += 40; inst.ingest({ type: 'sample', seq: seq++, t: now, tilt: 60, tiltSrc: 'orientation', side: null, lin: 0.05, linSrc: 'sensor', jerk: 5, screen: 0, rate: 60 }, now); inst.tick(now, 0.04); };
+  inst.startCalibration(now);
+  for (let i = 0; i < 90; i++) feed();
+  assert.equal(inst.calib.state, 'done');
+  assert.equal(inst.cal.sideAvailable, false);
+  assert.match(inst.calib.text, /not available/);
+  assert.equal(inst.sideAvailable, false);
+  for (let i = 0; i < 40; i++) feed();
+  close(inst.richness, 0.5, 0.01);
+});
+
+test('mapping switch sets the natural expression default; Accents in Tilt mapping uses lean for richness', () => {
+  const { inst, feed, setSide, at } = phoneReady();
+  inst.setMapping('intensity');
+  assert.equal(inst.exprSource, 'movement');
+  inst.setMapping('tilt');
+  assert.equal(inst.exprSource, 'sustain');
+  inst.setAudio(true);
+  inst.setMode('accents');
+  inst.arm();
+  setSide(4 + 30);
+  for (let i = 0; i < 10; i++) { feed(70, 0.05); inst.tick(at(), 0.04); }
+  const r = feed(70, 0.05, 2000);
+  assert.ok(r.accent);
+  assert.ok(inst.weights.every((w) => w > 0.9), 'full lean right → all harmonics in the note');
 });

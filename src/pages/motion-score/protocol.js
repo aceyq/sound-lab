@@ -93,6 +93,10 @@ export function validatePhoneMessage(m) {
     case 'command':
       if (!COMMANDS.includes(m.cmd)) return { ok: false, error: 'unknown command' };
       return { ok: true, msg: { type: 'command', cmd: m.cmd } };
+    case 'expr':
+      // Expression slider moved on the phone (Steady sustain).
+      if (!num(m.value, 0, 1)) return { ok: false, error: 'expression out of range' };
+      return { ok: true, msg: { type: 'expr', value: m.value } };
     case 'status':
       if (!SENSOR_STATES.includes(m.sensors)) return { ok: false, error: 'bad sensor state' };
       if (typeof m.hidden !== 'boolean') return { ok: false, error: 'bad hidden flag' };
@@ -101,6 +105,7 @@ export function validatePhoneMessage(m) {
       if (!Number.isInteger(m.seq) || m.seq < 0 || m.seq > 2 ** 31) return { ok: false, error: 'bad seq' };
       if (!num(m.t, 0, 1e12)) return { ok: false, error: 'bad timestamp' };
       if (!numOrNull(m.tilt, -180, 180)) return { ok: false, error: 'tilt out of range' };
+      if (m.side !== undefined && !numOrNull(m.side, -90, 90)) return { ok: false, error: 'sideways tilt out of range' };
       if (!numOrNull(m.lin, 0, 200)) return { ok: false, error: 'intensity out of range' };
       if (!numOrNull(m.jerk, 0, 100000)) return { ok: false, error: 'jerk out of range' };
       if (!num(m.screen, -360, 360)) return { ok: false, error: 'bad screen angle' };
@@ -111,6 +116,7 @@ export function validatePhoneMessage(m) {
         ok: true,
         msg: {
           type: 'sample', seq: m.seq, t: m.t, tilt: m.tilt, tiltSrc: m.tilt === null ? null : m.tiltSrc,
+          side: m.side === undefined ? null : m.side,
           lin: m.lin, linSrc: m.lin === null ? null : m.linSrc, jerk: m.jerk, screen: m.screen, rate: m.rate,
         },
       };
@@ -141,6 +147,13 @@ export function validateLaptopMessage(m) {
         // Live feedback for the phone screen (already mapped by the laptop).
         tiltRel: num(m.tiltRel, -180, 180) ? m.tiltRel : null,
         intensity: num(m.intensity, 0, 1) ? m.intensity : 0,
+        sideRel: num(m.sideRel, -180, 180) ? m.sideRel : null,
+        richness: num(m.richness, 0, 1) ? m.richness : null,
+        mapping: m.mapping === 'intensity' ? 'intensity' : 'tilt',
+        exprSource: m.exprSource === 'movement' ? 'movement' : 'sustain',
+        exprLevel: num(m.exprLevel, 0, 1) ? m.exprLevel : 0,
+        sideAvailable: m.sideAvailable !== false,
+        locked: m.locked === true,
         hits: Number.isInteger(m.hits) && m.hits >= 0 ? m.hits : 0,
         sound: m.sound === true,
       };

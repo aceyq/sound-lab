@@ -3,16 +3,41 @@
 export const HONESTY =
   'This uses phone sensor measurements and explicitly programmed mappings to synthesize sound. It does not train a model to recognize dance movements.';
 
-export const MAPPINGS = [
-  ['Tilt changes pitch.', 'Tilt the top of the phone toward you for higher, away from you for lower (±35° around your calibrated neutral).'],
-  ['Movement intensity changes harmonic richness.', 'Stronger movement adds harmonic components (1 to 12). In Flow it also makes the sound stronger.'],
-  ['Sharp movements trigger notes in Accents mode.', 'A quick jab or flick plays one short note.'],
-];
+// Legend rows per mapping: [rule, detail, color].
+export const MAPPINGS = {
+  tilt: [
+    ['Forward/back tilt changes pitch.', 'Top of the phone toward you = higher, away = lower (±35° around your calibrated neutral).', '#58d1ff'],
+    ['Sideways lean changes harmonic richness.', 'Lean left toward a pure sine, right toward a rich, bright tone (±30°). Neutral = medium. Pitch stays where it is.', '#c297ff'],
+    ['Sharp movements trigger notes in Accents mode.', 'A quick jab or flick plays one short note.', '#ffb74d'],
+  ],
+  intensity: [
+    ['Tilt changes pitch.', 'Tilt the top of the phone toward you for higher, away from you for lower (±35° around your calibrated neutral).', '#58d1ff'],
+    ['Movement intensity changes harmonic richness.', 'Stronger movement adds harmonic components (1 to 12). In Flow it also makes the sound stronger.', '#3fb950'],
+    ['Sharp movements trigger notes in Accents mode.', 'A quick jab or flick plays one short note.', '#ffb74d'],
+  ],
+};
+
+export const MAPPING_TEXT = {
+  tilt: 'Tilt instrument: forward/back tilt sets the pitch and sideways lean sets the harmonic richness, independently. You can hold one still while changing the other.',
+  intensity: 'Movement intensity (the original mapping): tilt sets the pitch, and moving harder adds harmonics and makes the sound stronger at the same time.',
+};
+
+export const EXPR_TEXT = {
+  sustain: 'Steady sustain: while armed, the tone keeps sounding at the Expression level set here or on the phone, so you can focus on pitch and richness.',
+  movement: 'Movement expression: the sound gets stronger the harder you move and fades when you are still.',
+};
 
 export const MODE_TEXT = {
-  flow: 'Keep moving to sustain sound. Tilt changes pitch; stronger movement adds harmonics and increases expression.',
-  accents: 'Make a sharp movement to play a short note. Tilt chooses its pitch; movement intensity shapes its richness.',
+  flow: 'A continuous tone. Tilt changes pitch; how strong it is comes from the Flow expression setting below.',
+  accents: 'Make a sharp movement to play a short note. Tilt chooses its pitch; the richness setting at that moment shapes its tone.',
 };
+
+// Automatic demo (Laptop Demo, simulated input, real synthesis).
+export const AUTO_DEMO = [
+  { id: 'pure', start: 0, end: 5, text: 'A pure 200 Hz sine: only the fundamental (richness 0%).' },
+  { id: 'fade', start: 5, end: 17, text: 'Pitch held at 200 Hz while higher harmonics fade in one by one (watch the harmonic bars and the spectrogram).' },
+  { id: 'move', start: 17, end: 30, text: 'Harmonic balance held steady while the fundamental moves: every harmonic moves with it.' },
+];
 
 export const PITCH_TEXT = 'Continuous allows smooth pitch slides. Pentatonic selects nearby notes from A minor pentatonic: A, C, D, E, G.';
 
@@ -28,20 +53,20 @@ export const HOW = [
     'A still phone still "feels" gravity (9.8 m/s²). We remove it so that only your movement counts.',
     'Most phones report acceleration with gravity already removed. If a phone only reports acceleration including gravity, the app estimates gravity as the slowly changing part of the signal (a 0.5 s low-pass filter) and subtracts it. That estimate is approximate, and Diagnostics says when it is being used.'],
   ['The mappings',
-    'Tilt → fundamental frequency (110–880 Hz). Movement intensity → harmonic components (1–12) and, in Flow, expression. Sharp change in acceleration → a short note in Accents.',
+    'Tilt instrument: forward/back tilt → fundamental frequency (110–880 Hz); sideways lean → harmonic richness. Movement intensity mapping: movement → harmonic components (1–12) and expression. In both, a sharp change in acceleration → a short note in Accents.',
     'The fundamental is the base frequency used to build the sound. Movement intensity is the size of the gravity-free acceleration, smoothed over about 0.12 s, minus your calibrated stillness noise, scaled so that about 5 m/s² (at Sensitivity 1.0×) is 100%. A "sharp movement" is a jerk (rate of change of acceleration) above a threshold, about 120 m/s³ at 1.0×.'],
   ['Why a logarithmic pitch mapping',
     'We hear pitch by ratios: each octave doubles the frequency. Equal tilt steps give equal musical steps.',
     '110 → 220 → 440 → 880 Hz are each one octave apart. With a logarithmic mapping each third of the tilt range is one octave; a straight (linear) mapping would squeeze the low notes together.'],
-  ['Why harmonics change timbre',
-    'Harmonics are frequencies at whole-number multiples of the fundamental. Adding them changes the tone\'s character, or timbre.',
-    'Harmonic component n has frequency n × fundamental and amplitude 1/n. The count shown includes the fundamental (1 = pure sine). All amplitudes are divided by the same number, 1 + 1/2 + … + 1/N, so the sum never exceeds full scale. Components at or above the Nyquist frequency (half the sample rate) are left out.'],
+  ['Fundamental, harmonics and timbre',
+    'The fundamental is the base frequency of this harmonic sound. Harmonics are whole-number multiples of it (2×, 3×, 4×…), so changing the fundamental moves all of them together. Changing how strong each harmonic is changes the waveform and the timbre, even while the fundamental stays fixed. Timbre is tone quality; brightness is one aspect of it.',
+    'The sound is 12 sine waves added together; harmonic n has frequency n × f0. The starting recipe gives harmonic n the amplitude 1/n. Harmonic richness fades harmonics in one after another: at 0% only the fundamental sounds, at 100% all 12 do, each with its own smooth fade instead of an on/off switch. Then the whole mixture is multiplied by one normalization factor so the summed wave peaks at exactly 1: it cannot clip, and the level changes only a little as harmonics are added (equal perceived loudness is not claimed). Harmonics at or above the Nyquist frequency (half the sample rate) are left out.'],
   ['Why smoothing, calibration and cooldowns',
     'Sensors are noisy, so raw values would make the sound wobble and click.',
     'Smoothing averages out tiny fluctuations. Calibration records your comfortable neutral tilt and how much the sensor reads when you hold still, so that resting counts as 0%. The harmonic count and pentatonic notes only change once you clearly pass a boundary (hysteresis). In Accents, after a note fires the detector waits 300 ms and for the movement to calm down, so one shake makes one note.'],
   ['Expression versus Master Volume',
-    'Expression is movement-controlled sound strength. Master Volume is the overall listening level you set by hand.',
-    'In Flow, Expression follows movement intensity with a gentle attack (≈0.08 s) and release (≈0.35 s), so brief pauses fade instead of chattering. In Accents, each note rises in 15 ms and decays to silence by 450 ms; a new hit restarts the note.'],
+    'Expression controls the strength of the signal the instrument makes. Master Volume only controls your listening level.',
+    'In Flow with Steady sustain, Expression is the slider (laptop or phone; they stay in sync). With Movement expression, Expression follows movement intensity with a gentle attack (≈0.08 s) and release (≈0.35 s), so brief pauses fade instead of chattering. In Accents, each note rises in 15 ms and decays to silence by 450 ms; a new hit restarts the note.'],
   ['Movement Score, waveform, spectrum, spectrogram',
     'Movement Score: sensor-derived control history. Waveform: audio amplitude over time. Spectrum: audio frequency content at a moment. Spectrogram: audio frequency content over time.',
     'The audio graphs are measured from the sound the laptop actually outputs (after Expression, Master Volume and Mute). The Movement Score is not audio at all: it plots the control values the app computed from the phone.'],
@@ -72,10 +97,8 @@ export const ZOOM_STEPS = [
 ];
 
 export const PERFORMANCE_30S = [
-  ['0–4 s', 'Flow + Continuous. Hold still: silence.'],
-  ['4–9 s', 'Slow, gentle arm wave: a soft, simple tone.'],
-  ['9–15 s', 'Keep a similar wave while tilting the phone toward/away from you: the pitch rises and falls.'],
-  ['15–21 s', 'Hold the tilt steady and make bigger, more energetic movements: more harmonics, stronger sound.'],
-  ['21–28 s', 'Switch to Accents and Pentatonic. Three deliberate sharp hits at three different tilts: three notes.'],
-  ['28–30 s', 'Press Disarm (or Mute / Panic) to finish.'],
+  ['0–10 s', 'Tilt instrument, Flow, Steady sustain. Tick Lock fundamental (200 Hz). Lean left: a pure sine. Lean slowly right: harmonics fade in; the pitch stays at 200 Hz.'],
+  ['10–20 s', 'Hold a medium lean and untick the lock. Tilt toward/away from you: the pitch moves and every harmonic moves with it.'],
+  ['20–27 s', 'Switch to Accents and Pentatonic. Three sharp hits at different tilts and leans: three notes, different pitch and tone.'],
+  ['27–30 s', 'Press Disarm (or Mute / Panic) to finish.'],
 ];

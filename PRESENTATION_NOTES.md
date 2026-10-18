@@ -72,8 +72,13 @@ Labels match the app exactly.
 | Control | What it does | When to use it | What I should observe |
 | --- | --- | --- | --- |
 | **Fundamental** card | Current fundamental frequency in Hz, nearest note, and tilt from neutral. | Point to it while tilting. | Number rises when tilting toward you. |
-| **Harmonic components** card | How many components are in the sound, including the fundamental (1 = pure sine). | Point to it while moving harder. | Rises with stronger movement. |
-| **Expression** card | Movement-controlled sound strength (separate from Master Volume). | Point to it in Flow. | 0% when still, rises when moving. In Accents it flashes with each note. |
+| **Harmonic richness** card | Tilt instrument: richness 0–100% from sideways lean ("harmonics up to ≈H6.5 of 12"). Movement intensity mapping: "N of 12" components including the fundamental. | Point to it while leaning. | Rises as you lean right. Shows ⚠ if the phone does not report sideways lean. |
+| **Expression** card | Signal strength, with its source: steady sustain (slider), movement intensity, or the note envelope in Accents. Separate from Master Volume. | Point to it when explaining loudness. | Steady sustain: stays at the slider value. Movement: 0% when still. |
+| **Mapping: Tilt instrument / Movement intensity** | Tilt instrument (default): forward/back tilt = pitch, sideways lean = harmonic richness, independently. Movement intensity: the original mapping (moving harder = more harmonics + stronger). | Tilt instrument to demonstrate harmonics; Movement intensity for energetic dancing. | Legend, phone instructions and Movement Score switch to match. |
+| **Flow expression: Steady sustain / Movement expression** (Flow only) | Steady sustain: the tone keeps sounding at the **Expression** slider level while armed (default for Tilt instrument). Movement expression: strength follows movement. | Steady sustain for explaining timbre; Movement expression for dancing. | With Steady sustain a still phone still sounds. |
+| **Expression** slider | Sets the steady sustain level. The same slider is on the phone; they stay in sync. | Before demonstrating. | Expression card and the white track change. |
+| **Lock fundamental at [200] Hz** | Holds the pitch at the typed value (50–1000 Hz). Forward/back tilt and Pentatonic no longer change it; sideways lean still changes the harmonics. Untick to return to tilt control. | To show harmonics changing on a fixed fundamental. | Fundamental card shows 🔒 LOCKED; harmonic rows read 200, 400, 600 Hz… |
+| **Harmonics right now** panel | One row per harmonic H1–H12: frequency (n × f0), light bar = recipe amplitude (weight × 1/n), thin blue bar = output amplitude after normalization. | When explaining what richness does. | Lower rows fill first as you lean right; all rows move together when f0 changes. |
 | **Flow** / **Accents** | Chooses how movement is interpreted (see section D). | Flow for sustained sound; Accents for short notes. | The sentence under the buttons changes. |
 | **Continuous** / **Pentatonic** | Continuous allows smooth pitch slides. Pentatonic selects nearby notes from A minor pentatonic: A, C, D, E, G. | Continuous to explain frequency; Pentatonic for a musical performance. | In Pentatonic the Hz value jumps between note values. |
 | **■ Stop Audio** | Fades out, stops the audio engine and disarms. | When finished. | Audio: *Off*. |
@@ -90,8 +95,10 @@ Labels match the app exactly.
 
 | Control | What it does | When to use it | What I should observe |
 | --- | --- | --- | --- |
-| **Tilt** slider (−35° to +35°) | Simulated tilt → pitch. Keys ← → | Fallback demo. | Fundamental changes. |
-| **Movement intensity** slider (0–100%) | Simulated movement → richness and Flow expression. Keys ↑ ↓ | Fallback demo. | Harmonic components and Expression change; 0% = silence. |
+| **▶ Auto demo (simulated)** | 30 s walkthrough with simulated input through the real synthesizer: (1) pure 200 Hz sine, (2) 200 Hz held while harmonics fade in, (3) harmonic balance held while the pitch moves. A yellow banner says "AUTO DEMO · simulated input". Needs Start Audio. | No phone, or to show the concept cleanly. | Step banner; harmonic panel, Movement Score and spectrogram follow. Moving a slider or **■ Stop auto demo** stops it. |
+| **Forward/back tilt** slider (−35° to +35°) | Simulated tilt → pitch. Keys ↑ ↓ | Fallback demo. | Fundamental changes (unless locked). |
+| **Sideways lean** slider (−30° to +30°) | Simulated lean → harmonic richness. Keys ← → | Fallback demo (Tilt instrument). | Harmonic panel and richness change. |
+| **Movement intensity** slider (0–100%) | Simulated movement → movement expression (and harmonics in the Movement intensity mapping). Keys − / = | Fallback demo. | Expression changes when Movement expression is selected. |
 | **⚡ Trigger Accent (A)** | Simulated sharp movement → short note in Accents mode. Key A (or Space). | Accents mode only. | One short note, orange marker. |
 | **Stop Laptop Demo** | Turns off simulated input (silences and disarms). | When done with the fallback. | Input: *None*. |
 
@@ -130,14 +137,18 @@ The phone shows **one big button** for the next step; its label changes:
 
 - **Fundamental frequency:** the base frequency used to build the sound. Here 110 Hz (A2) to 880 Hz (A5), three octaves.
 - **Tilt → pitch:** forward/back tilt (`beta` from DeviceOrientationEvent) while holding the phone upright in portrait. Relative to your calibrated neutral, ±35° covers the whole range: −35° = 110 Hz, neutral ≈ 311 Hz, +35° = 880 Hz. Tilt toward you = higher (can be inverted). The mapping is logarithmic: every 23⅓° is one octave.
-- **Harmonics:** frequencies at whole-number multiples of the fundamental. Adding them changes the tone's character, or **timbre**. Component n has frequency n × f₀ and amplitude 1/n; all are divided by 1 + 1/2 + … + 1/N so the sum never exceeds full scale. The displayed count includes the fundamental (1 to 12). Components at or above Nyquist (half the sample rate) are left out. The count changes only after you pass a boundary by 0.3 (hysteresis).
-- **Amplitude / Expression:** how strong the sound is. *Expression* is set by movement; *Master Volume* is the listening level you set. Flow: Expression follows movement intensity with a ≈0.08 s attack and ≈0.35 s release. Accents: 15 ms attack to a fixed peak, exponential decay, forced to zero at 450 ms; a new hit restarts the note (no build-up).
+- **Fundamental:** the base frequency of this harmonic sound. **Harmonics:** whole-number multiples of it (H2 = 2 × f0, H3 = 3 × f0…). Changing the fundamental moves all harmonic frequencies together. Changing harmonic amplitudes changes the waveform and the timbre while the fundamental can stay fixed. **Timbre** is tone quality; brightness is one aspect of it.
+- **Sideways lean → harmonic richness (Tilt instrument):** lean = the angle of the phone's left–right axis from level, computed as asin(sin γ · cos β) from DeviceOrientationEvent beta and gamma (this stays reliable when the phone is upright, where gamma alone does not). Relative to your calibrated neutral: −30° = 0% (pure sine), neutral = 50%, +30° = 100% (all 12). Smoothed over ≈0.1 s.
+- **How richness changes the amplitudes:** the sound is 12 sine oscillators at n × f0, all started together at phase 0. Richness sets a position p = 1 + 11 × richness. Harmonic n's weight is 1 for n = 1 (the fundamental is always on) and clamp(p − (n − 1), 0, 1) for the rest, so each harmonic fades in over its own stretch: H2 while p goes 1→2, H3 while 2→3, and so on. Recipe amplitude = weight × 1/n. Output amplitude = recipe × one normalization factor = 1 ÷ (peak of the summed wave), so the mixture's peak is exactly 1 and never clips. Measured level change from a pure sine to all 12: about −2.8 dB RMS (equal perceived loudness is not claimed). Gains glide over ≈40 ms; components at or above Nyquist are left out.
+- **Movement intensity mapping (original):** harmonic count 1–12 (whole numbers, including the fundamental) from movement, with hysteresis 0.3; same synthesizer, weights 1 or 0.
+- **Amplitude / Expression:** *Expression* is the signal strength the instrument produces; *Master Volume* is your listening level. Steady sustain: Expression = the slider (laptop/phone). Movement expression: follows movement intensity with a ≈0.08 s attack and ≈0.35 s release.
+- **Lock fundamental:** f0 = the typed value (50–1000 Hz) exactly; while locked, tilt and Pentatonic are ignored, so the displayed and audible frequency are the same number. Accents: 15 ms attack to a fixed peak, exponential decay, forced to zero at 450 ms; a new hit restarts the note (no build-up).
 - **Orientation:** which way the phone points (degrees). The phone's browser computes it by combining its motion sensors.
 - **Acceleration:** how fast the phone's speed changes (m/s²). **Movement intensity** = size of the gravity-free acceleration, smoothed over ≈0.12 s, minus your stillness noise, scaled so ≈5 m/s² above rest = 100% (at Sensitivity 1.0×). It measures the phone's acceleration, not physical energy, dance quality or whole-body motion.
 - **Sharp movement (accent):** jerk, the rate of change of acceleration (m/s³), above a threshold (≈120 m/s³ at 1.0×, or 4 × your calibrated jerk noise if larger). After a note: wait for jerk to drop below half the threshold and at least 300 ms.
 - **Gravity removal:** most phones report acceleration with gravity removed. If not, the app estimates gravity with a 0.5 s low-pass filter and subtracts it (approximate; Diagnostics says "gravity estimated").
 - **Smoothing:** averaging out tiny jitter so the sound doesn't wobble or click.
-- **Calibration:** 2 s of stillness records your neutral tilt (average angle) and the sensor's noise at rest (so rest = 0%). It fails if you moved more than 15° or the phone wasn't still.
+- **Calibration:** 2 s of stillness records your neutral forward/back tilt, your neutral sideways lean, and the sensor's noise at rest. It fails if you moved more than 15° on either axis. If the phone does not report sideways lean, calibration says so and richness stays at medium.
 - **Pentatonic quantization:** snapping to the nearest note of A minor pentatonic (A C D E G) between A2 and A5, keeping the current note until you are clearly (0.6 semitone) closer to another.
 - **Waveform:** audio amplitude over time. **Spectrum:** audio frequency content at a moment. **Spectrogram:** audio frequency content over time (here: log frequency axis, ≈10 s, brighter = louder, measured at the laptop's output after Expression, Master Volume and Mute). **Movement Score:** sensor-derived control history, not audio.
 
@@ -145,18 +156,16 @@ The phone shows **one big button** for the next step; its label changes:
 
 ## E. Demonstration
 
-### 30-second performance
+### 30-second performance (Tilt instrument)
 
 | Time | Do | Point to |
 | --- | --- | --- |
-| 0–4 s | Flow + Continuous. Hold still: silence. | Expression 0%, flat green track. |
-| 4–9 s | Slow, gentle arm wave: soft, simple tone. | Expression and Harmonic components rise a little. |
-| 9–15 s | Keep a similar wave while tilting toward/away from you: pitch rises and falls. | Fundamental Hz, blue Pitch line, spectrogram lines moving up/down. |
-| 15–21 s | Hold the tilt steady and move more energetically: richer and stronger. | Harmonic components up to ~10, more stacked lines in the spectrogram. |
-| 21–28 s | Switch to **Accents** and **Pentatonic**. Three deliberate sharp hits at three different tilts. | Orange accent markers; three short notes at different heights in the spectrogram. |
-| 28–30 s | **Disarm** (or **🔇 Mute / Panic**). | Control: Disarmed. |
+| 0–10 s | Flow, Steady sustain. Tick **Lock fundamental at 200 Hz**. Lean left: pure sine. Lean slowly right. | Harmonic panel rows filling from H2 upward; new lines at 400, 600, 800 Hz in the spectrogram; Fundamental stays 200 Hz. |
+| 10–20 s | Hold a medium lean, untick the lock, tilt toward/away from you. | Fundamental Hz and every harmonic row change together; the spectrogram's stack of lines moves up and down as one. |
+| 20–27 s | **Accents** + **Pentatonic**. Three sharp hits at different tilts and leans. | Orange markers; three short notes with different pitch and tone. |
+| 27–30 s | **Disarm** (or **🔇 Mute / Panic**). | Control: Disarmed. |
 
-Tilt and movement intensity are physically linked (tilting is itself a movement), so this separates them approximately, not perfectly.
+The **▶ Auto demo** in Laptop Demo performs steps like these with simulated input, through the same synthesizer.
 
 ### Dancer-inspired ideas
 
@@ -166,7 +175,7 @@ Tilt and movement intensity are physically linked (tilting is itself a movement)
 
 ### Demo Guide (in the app)
 
-17 spotlight steps: status bar → setup → Mute / Panic → Fundamental → Harmonic components → Expression → Flow vs Accents → Continuous vs Pentatonic → audio controls → the three rules → each Movement Score track → spectrogram → Freeze → Presentation Mode → finish.
+21 spotlight steps: status bar → setup → Mute / Panic → mapping → Fundamental → Harmonic richness → Expression → Flow vs Accents → Continuous vs Pentatonic → Lock fundamental → harmonic panel → audio controls → the rules → the four Movement Score tracks → spectrogram → Freeze → Presentation Mode → finish.
 
 ---
 
@@ -175,9 +184,11 @@ Tilt and movement intensity are physically linked (tilting is itself a movement)
 - **Why a phone instead of finger tracking?** It measures *how* I move (smooth, sharp, energetic), works in any lighting, and doesn't need me in front of the camera. It's a different interaction from the camera demo we saw.
 - **Does this recognize dance moves?** No. It measures the phone's tilt and acceleration and applies fixed rules.
 - **Did I train a machine-learning model?** No. Everything is explicitly programmed mappings.
-- **Why does stronger movement add harmonics?** It's my design choice: more energy → brighter, richer timbre feels natural. Mathematically it adds components at 2f, 3f, … with amplitudes 1/n.
+- **Why lean for harmonics instead of moving harder?** So pitch and timbre have separate gestures: you can hold one still while changing the other, which makes the harmonics audible on their own. The old mapping is still available as "Movement intensity".
+- **Why does stronger movement add harmonics?** (Movement intensity mapping) It's my design choice: more energy → brighter, richer timbre feels natural. Mathematically it adds components at 2f, 3f, … with amplitudes 1/n.
 - **How is gravity handled?** Most phones report acceleration with gravity already removed. Otherwise the app estimates gravity as the slowly changing part of the signal and subtracts it, which is an approximation.
-- **Why does sound stop when I stop moving?** In Flow, Expression follows movement intensity, and calibration makes stillness count as 0%. It fades over ~0.35 s so short pauses don't chatter.
+- **Why does sound keep going when I hold still?** With Steady sustain (default for the Tilt instrument) the tone stays at the Expression slider level while armed, so you can explore pitch and timbre without dancing constantly. Safety still applies: disconnect, stale data, Disarm, Stop or Panic silence it.
+- **Why does sound stop when I stop moving?** (Movement expression) Expression follows movement intensity, and calibration makes stillness count as 0%. It fades over ~0.35 s so short pauses don't chatter.
 - **Why are Flow and Accents different?** Same sensors, two interpretations. Flow is like bowing a violin: sound lasts while you keep moving. Accents is like hitting a drum: smooth movement is silent, each sharp change (jerk) plays one short note.
 - **What happens if the phone disconnects?** The laptop goes silent within about 0.15 s, cancels any accent, shows *Connection lost*, and disarms; you must Arm again. If data simply stops for 0.5 s it goes silent; after 3 s it disarms. The laptop enforces this itself, even if the phone can't send a goodbye.
 - **What is simulated in Laptop Demo?** Tilt, movement intensity and accents come from sliders/keys instead of the phone. They go through the same mappings and audio. It's always labeled "Laptop Demo — phone sensors are not connected."

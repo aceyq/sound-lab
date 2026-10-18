@@ -84,82 +84,50 @@ Before you start:
 
 ---
 
-## Part 2 · Motion Score (about 3–4 minutes)
+## Part 2 · Motion Score (about 60–90 seconds)
 
-Set up before your turn so you're ready to play:
-1. **[Click the "2. Motion Score" tab.]** The QR code appears.
-2. Scan it with your phone, tap **Enable Sensors** → **Allow**, and hold still while it calibrates.
-3. Leave the laptop on **Flow** and **Continuous**, with audio still off.
-
-### Why and what
-
-"For my second project, the assignment was to control sound with a gesture. Professor Minces already showed hand tracking with the camera, so I wanted something different, and as a dancer I care about *how* I move, not just where my hand is. So my phone is the controller. Its motion sensors send data to this page on my laptop, and the laptop makes the sound."
-
-*(Point at the status bar at the top.)*
-"These lights tell me everything is connected. Phone connected means the phone can talk to the laptop. Sensors active means motion data is arriving. And Armed means I'm actually allowing movement to make sound. Separately, the audio engine has to be on."
-
-**[Click "▶ Start Audio". Then tap "Arm" on the phone.]**
-
-"Pairing on its own never makes sound. I have to turn audio on and arm it on purpose."
+Before your turn:
+1. **[Click the "2. Motion Score" tab.]** Scan the QR code with your phone.
+2. On the phone, tap **Enable Sensors** → **Allow**, then hold still while it calibrates.
+3. On the laptop, check it says **Tilt instrument**, **Flow** and **Steady sustain**.
+4. **[Click "▶ Start Audio".]** Leave it disarmed for now.
 
 **[Click "🖥 Presentation Mode".]**
 
-### The three rules
+"For my second project my phone is the instrument. Its motion sensors stream to my laptop, which builds the sound out of harmonics, the same additive synthesis as my first project. I wanted pitch and tone color to be separate gestures, so: tilting the phone forward and back changes the pitch, and leaning it sideways, like a steering wheel, changes how many harmonics are in the sound."
 
-*(Point at the legend with the little phone drawing.)*
-"There are three rules, and I programmed them myself. There's no machine learning. One: tilt changes pitch. Two: movement intensity changes harmonic richness. Three: sharp movements trigger notes in Accents mode."
+**[Tick "Lock fundamental at 200 Hz". Tap "Arm" on the phone.]** *(Lean the phone all the way left.)*
 
-### Flow
+"I've locked the pitch at 200 hertz. Leaning left, this is a pure sine wave: just the fundamental."
 
-"I'm in Flow mode. Think of it like bowing a violin: the sound only lasts as long as I keep moving."
+*(Point at the harmonic panel: only H1 is lit.)*
 
-*(Hold the phone still.)* "If I hold still… silence."
+*(Lean slowly to the right.)*
+"As I lean right, harmonics fade in one at a time: 400, 600, 800 hertz, each a whole-number multiple of 200. The pitch doesn't change, still 200, but the tone gets brighter. That's timbre."
 
-*(Point at the Expression card showing 0%.)*
+*(Point at the spectrogram: new lines appearing above the 200 Hz line.)*
+"Down here is the measured sound. The bottom line stays put, and the new lines stack up above it."
 
-*(Make a slow, gentle arm wave.)* "A gentle movement gives a soft, simple tone."
+**[Untick "Lock fundamental".]** *(Hold a medium lean, then tilt the top toward you and away.)*
 
-*(Point at Harmonic components: a low number.)*
+"Now I keep the lean the same and tilt instead. The fundamental moves, and every harmonic moves with it, because they're all multiples of it. Same tone, different pitch."
 
-*(Keep waving, and tilt the top of the phone toward you and away.)* "Now I tilt. Toward me goes higher, away goes lower."
+*(Point at the Movement Score: the blue pitch line moves while the purple richness line stays flat.)*
+"This top graph is just the control data from my phone: blue is pitch, purple is richness. You can see I changed one while holding the other."
 
-*(Point at the Fundamental number, then at the blue line in the Movement Score.)*
-"You can see the note change here, and the blue line draws it over time, like sheet music."
-
-*(Hold the tilt steady and move more energetically.)* "Now I keep the tilt the same and move harder. The tone gets brighter and stronger."
-
-*(Point at Harmonic components rising, then at the green track.)*
-"Harder movement adds harmonics, the same idea as in my first project: extra frequencies at 2×, 3×, 4× the base. The pitch stays the same but the color of the sound changes. That color is called timbre."
-
-### The spectrogram
-
-*(Point at the spectrogram.)*
-"This bottom graph is the actual sound coming out of the laptop. The lowest bright line is the note I'm playing, and the lines stacked above it are the harmonics. So the Movement Score above shows what my phone told the instrument, and the spectrogram shows the sound that came out."
-
-### Accents and Pentatonic
-
-**[Click "Accents", then "Pentatonic".]**
-
-"Accents mode is more like hitting a drum. Smooth movement makes no sound; a sharp jab plays one short note."
-
-"Pentatonic means the pitch snaps to five notes, A, C, D, E and G, instead of sliding. Those five notes all sound good together, so whatever I do sounds like a melody."
-
-*(Make three sharp flicks: one tilted down, one level, one tilted up.)*
-
-*(Point at the three orange lines in the Movement Score, and the three notes at different heights in the spectrogram.)*
-"Three hits, three notes. The tilt picked each pitch, and how hard I hit set how rich each note is."
-
-### Ending and limitations
+**[Click "Accents".]** *(Make two or three sharp flicks at different leans.)* "And in Accents mode each sharp jab plays a short note, using whatever pitch and tone I'm holding."
 
 **[Tap "Disarm" on the phone, or click "🔇 Mute / Panic".]**
 
-"Disarm stops it. And if anything goes wrong, Mute / Panic silences everything instantly. If the phone disconnects or locks, the laptop goes silent by itself within a fraction of a second."
+"So: tilt moves the fundamental and everything with it, and lean changes the harmonic amplitudes while the fundamental stays fixed. There's no machine learning; these are rules I programmed."
 
-"Some honest limitations. It doesn't recognize dance moves. It only measures how the phone tilts and accelerates. Tilt and movement are physically linked, so I can only separate them roughly. And pairing goes over the internet through a free service, so on some networks it can fail. That's why there's a Laptop Demo mode, which is clearly labeled as simulated."
-
-**[Click "✕ Exit Presentation".]**
-
----
+**No phone? Use the auto demo instead:**
+1. **[Click "💻 Use Laptop Demo", then "▶ Start Audio", then "▶ Auto demo (simulated)".]**
+2. Say: "This is simulated input, but it runs through the same synthesizer and graphs."
+3. Narrate the three steps as the yellow banner changes:
+   - a pure 200 Hz sine,
+   - harmonics fading in at 200 Hz,
+   - the pitch moving with the harmonic balance held steady.
 
 ## If something goes wrong mid-demo
 
@@ -176,3 +144,5 @@ Set up before your turn so you're ready to play:
 - **"How does it know the tilt?"** "The phone combines its motion sensors to work out its orientation in degrees. Movement is measured as acceleration, with gravity removed so a still phone reads zero."
 - **"Why does more movement add harmonics?"** "It's a design choice. More energy makes a brighter tone, which feels natural, and it reuses the harmonics idea from my first project."
 - **"What's Pentatonic?"** "A five-note scale. Snapping to it means any movement lands on notes that sound good together."
+- **"Why not just one mapping?"** "The original one ties harmonics to how hard I move, which is fun for dancing, but pitch and tone change together. The tilt instrument separates them so you can actually hear what harmonics do. Both are still there."
+- **"Is the loudness the same when harmonics come in?"** "I normalize the waveform so its peak never clips; the level drops about 3 dB from a pure sine to all twelve. I didn't try to match perceived loudness exactly."

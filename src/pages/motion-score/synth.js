@@ -1,26 +1,29 @@
-// Web Audio instrument for Motion Score.
+// Web Audio instrument for Motion Score: additive synthesis.
 //
 // Signal path (created by Start Audio, closed when the page unmounts):
 //
-//   osc A (PeriodicWave, N harmonics) → xfade A ┐
-//   osc B (PeriodicWave, N' harmonics) → xfade B ┴→ expression → master volume → mute → analyser → speakers
-//                                                                                     (MEASUREMENT POINT)
+//   sine osc 1·f0 → gain a₁ ┐
+//   sine osc 2·f0 → gain a₂ ┤
+//        …                  ├→ expression → master volume → mute → analyser → speakers
+//   sine osc 12·f0 → gain a₁₂┘                                   (MEASUREMENT POINT)
 //
-// Each oscillator plays ONE periodic waveform built from harmonic components
-// 1…N (component 1 is the fundamental) with amplitudes (1/n) ÷ Σ(1/k), all
-// sine terms starting at phase 0. Because the harmonics live inside a single
-// waveform, they are always exactly n × f0 and can never drift out of phase.
-// When the harmonic count changes, the idle oscillator gets the new waveform
-// and the two crossfade over 40 ms. Both oscillators started at the same
-// instant and always receive identical frequency changes, so they stay in
-// phase with each other too.
+// The sound really is a sum of 12 sine waves (harmonic components; component
+// 1 is the fundamental). All twelve oscillators start at the same instant
+// with phase 0 and keep running until Stop / Panic, so nothing is created or
+// destroyed while you play (no stuck notes). Every pitch change is applied to
+// every oscillator as the same smooth ramp scaled by n, so harmonic n is
+// always exactly n × f0 and the phases never drift apart.
+//
+// The gains aₙ come from mapping.harmonicMix(): the 1/n recipe, faded by
+// harmonic richness, times one shared normalization factor. Each gain glides
+// to its new value (≈40 ms), so harmonics fade in and out smoothly.
 //
 // The analyser sits after Expression, Master Volume and Mute: the graphs
 // show what actually goes to the speakers.
 
-import { H_MAX, harmonicAmplitudes, ACCENT } from './mapping.js';
+import { H_MAX, harmonicMix, ACCENT } from './mapping.js';
 
-const XFADE = 0.04;
+const GAIN_TC = 0.04;
 const STOP_FADE = 0.06;
 const SILENCE_TC = 0.025; // ≈ 0.1 s to silence
 const PITCH_TC = { continuous: 0.05, pentatonic: 0.015 };
@@ -45,11 +48,12 @@ export class MotionSynth {
     this.masterVolume = masterVolume;
     this.state = 'off'; // off | starting | on | panic
     this.f0 = 220;
-    this.count = 1;
+    this.weights = [1, ...new Array(H_MAX - 1).fill(0)];
+    this.mix = harmonicMix(this.weights, this.f0, 24000);
     this.voices = null;
     this.closed = false;
-    this.waves = new Map();
     this.accentsPlayed = 0;
+    this.liveOscillators = 0;
   }
 
   get running() {
@@ -58,6 +62,10 @@ export class MotionSynth {
 
   get sampleRate() {
     return this.ctx ? this.ctx.sampleRate : 48000;
+  }
+
+  get nyquist() {
+    return this.sampleRate / 2;
   }
 
   _context() {
@@ -73,20 +81,8 @@ export class MotionSynth {
     this.analyser.fftSize = 8192;
     this.analyser.smoothingTimeConstant = 0;
     this.master.connect(this.mute).connect(this.analyser).connect(ctx.destination);
+    this.mix = harmonicMix(this.weights, this.f0, this.nyquist);
     return ctx;
-  }
-
-  _wave(count) {
-    const nyq = this.sampleRate / 2;
-    const { amps, audible } = harmonicAmplitudes(count, this.f0, nyq);
-    const key = audible;
-    if (!this.waves.has(key)) {
-      const real = new Float32Array(H_MAX + 1);
-      const imag = new Float32Array(H_MAX + 1);
-      amps.forEach((a, i) => { imag[i + 1] = a; }); // sine terms, phase 0
-      this.waves.set(key, this.ctx.createPeriodicWave(real, imag, { disableNormalization: true }));
-    }
-    return { wave: this.waves.get(key), audible };
   }
 
   /** Start Audio (needs a click). Also the only way out of Panic. */
@@ -101,25 +97,30 @@ export class MotionSynth {
     this.mute.gain.cancelScheduledValues(t);
     this.mute.gain.setValueAtTime(1, t);
     const expr = ctx.createGain();
-    expr.gain.value = 0; // silent until movement opens it
+    expr.gain.value = 0; // silent until allowed
     expr.connect(this.master);
     const t0 = t + 0.02;
-    const { wave, audible } = this._wave(this.count);
-    const mk = (g) => {
+    this.mix = harmonicMix(this.weights, this.f0, this.nyquist);
+    const oscs = [];
+    const gains = [];
+    for (let n = 1; n <= H_MAX; n++) {
       const o = ctx.createOscillator();
-      o.setPeriodicWave(wave);
-      o.frequency.value = this.f0;
-      const x = ctx.createGain();
-      x.gain.value = g;
-      o.connect(x).connect(expr);
+      o.type = 'sine';
+      o.frequency.value = n * this.f0;
+      const g = ctx.createGain();
+      g.gain.value = this.mix.output[n - 1];
+      o.connect(g).connect(expr);
       o.start(t0);
-      return { o, x };
-    };
-    this.voices = { a: mk(1), b: mk(0), active: 'a', expr, audible, t0 };
+      this.liveOscillators++;
+      o.onended = () => { this.liveOscillators--; o.disconnect(); };
+      oscs.push(o);
+      gains.push(g);
+    }
+    this.voices = { oscs, gains, expr, t0 };
     this.state = 'on';
   }
 
-  /** Stop Audio: short fade, then release everything. */
+  /** Stop Audio: short fade, then release every oscillator. */
   stop() {
     if (this.state !== 'on' && this.state !== 'starting') return;
     this.state = 'off';
@@ -153,15 +154,13 @@ export class MotionSynth {
     const t = this.ctx.currentTime;
     holdAt(v.expr.gain, t);
     v.expr.gain.linearRampToValueAtTime(0, t + Math.max(0.003, fadeSec));
-    for (const { o } of [v.a, v.b]) {
+    for (const o of v.oscs) {
       try { o.stop(Math.max(t + fadeSec + 0.02, v.t0)); } catch { /* already stopped */ }
-      o.onended = () => o.disconnect();
     }
     setTimeout(() => {
       try {
         v.expr.disconnect();
-        v.a.x.disconnect();
-        v.b.x.disconnect();
+        for (const g of v.gains) g.disconnect();
       } catch { /* context closed */ }
     }, (fadeSec + 0.2) * 1000);
   }
@@ -171,42 +170,36 @@ export class MotionSynth {
     if (this.ctx) rampTo(this.ctx, this.master.gain, v, 0.02);
   }
 
-  /** Fundamental frequency; both oscillators get the same change. */
+  /** Fundamental frequency: every harmonic moves with it (n × f0). */
   setPitch(f0, mode = 'continuous', { instant = false } = {}) {
+    // Same pitch as last time: leave the running glide alone so it settles
+    // exactly on n × f0 (re-anchoring every tick can stall it slightly short).
+    if (!instant && this.voices && f0 === this.f0) return;
+    const changedNyquistSet = this.ctx && this.mix.recipe.some((a, i) => ((i + 1) * f0 < this.nyquist) !== ((i + 1) * this.f0 < this.nyquist));
     this.f0 = f0;
     const v = this.voices;
     if (!v) return;
     const t = this.ctx.currentTime;
-    for (const { o } of [v.a, v.b]) {
+    v.oscs.forEach((o, i) => {
       holdAt(o.frequency, t);
-      if (instant) o.frequency.linearRampToValueAtTime(f0, t + 0.005);
-      else o.frequency.setTargetAtTime(f0, t, PITCH_TC[mode] || PITCH_TC.continuous);
-    }
-    // Harmonics at or above Nyquist are excluded: rebuild if that changes.
-    if (harmonicAmplitudes(this.count, f0, this.sampleRate / 2).audible !== v.audible) this._swapWave();
+      if (instant) o.frequency.linearRampToValueAtTime((i + 1) * f0, t + 0.005);
+      else o.frequency.setTargetAtTime((i + 1) * f0, t, PITCH_TC[mode] || PITCH_TC.continuous);
+    });
+    // Harmonics at or above Nyquist are excluded: re-mix if that set changed.
+    if (changedNyquistSet) this.setWeights(this.weights, true);
   }
 
-  /** Harmonic components including the fundamental, 1…12. */
-  setHarmonicCount(n) {
-    if (n === this.count) return;
-    this.count = n;
-    if (this.voices) this._swapWave();
-  }
-
-  _swapWave() {
+  /**
+   * How much of each harmonic is on (12 values, 0..1). Gains glide to the
+   * new mix; small changes are skipped so the peak calculation stays cheap.
+   */
+  setWeights(weights, force = false) {
+    if (!force && weights.every((w, i) => Math.abs(w - this.weights[i]) < 0.002)) return;
+    this.weights = weights.slice();
+    this.mix = harmonicMix(this.weights, this.f0, this.nyquist);
     const v = this.voices;
-    const { wave, audible } = this._wave(this.count);
-    v.audible = audible;
-    const from = v[v.active];
-    const toKey = v.active === 'a' ? 'b' : 'a';
-    const to = v[toKey];
-    const t = this.ctx.currentTime;
-    to.o.setPeriodicWave(wave);
-    holdAt(to.x.gain, t);
-    to.x.gain.linearRampToValueAtTime(1, t + XFADE);
-    holdAt(from.x.gain, t);
-    from.x.gain.linearRampToValueAtTime(0, t + XFADE);
-    v.active = toKey;
+    if (!v) return;
+    v.gains.forEach((g, i) => rampTo(this.ctx, g.gain, this.mix.output[i], GAIN_TC));
   }
 
   /** Flow: follow the expression envelope (0…1) smoothly. */
@@ -246,6 +239,11 @@ export class MotionSynth {
 
   get exprGain() {
     return this.voices ? this.voices.expr.gain.value : 0;
+  }
+
+  /** Current gains actually on the oscillators (after their glide). */
+  liveGains() {
+    return this.voices ? this.voices.gains.map((g) => g.gain.value) : this.mix.output.slice();
   }
 
   close() {
