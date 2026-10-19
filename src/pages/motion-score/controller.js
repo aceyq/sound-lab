@@ -6,26 +6,32 @@ import { h } from '../../lib/dom.js';
 import { SessionClient } from './connection.js';
 import { MotionFeatures, RateMeter } from './sensors.js';
 import { normalizeSessionId, normalizeToken, SAMPLE_RATE_HZ } from './protocol.js';
+import { holdCheck } from './mapping.js';
 
 const NO_EVENTS_MS = 2500;
 
 // Front and side view of how to hold and move the phone.
 const PHONE_FIGURE = `
-<svg viewBox="0 0 320 120" width="100%" role="img" aria-label="Side view: tilt the top toward you for higher pitch, away for lower. Front view: lean left for a purer tone, right for a richer tone.">
-  <text x="80" y="14" text-anchor="middle" fill="#9aa7b6" font-size="11">side view: pitch</text>
-  <rect x="74" y="34" width="12" height="54" rx="3" fill="none" stroke="#58d1ff" stroke-dasharray="3 3" transform="rotate(-25 80 88)"/>
-  <rect x="74" y="34" width="12" height="54" rx="3" fill="none" stroke="#58d1ff" stroke-dasharray="3 3" transform="rotate(25 80 88)"/>
-  <rect x="74" y="34" width="12" height="54" rx="3" fill="#58d1ff"/>
-  <text x="34" y="44" text-anchor="middle" fill="#f0f6fc" font-size="12">higher</text>
-  <text x="126" y="44" text-anchor="middle" fill="#f0f6fc" font-size="12">lower</text>
-  <text x="80" y="110" text-anchor="middle" fill="#9aa7b6" font-size="10">top toward / away from you</text>
-  <text x="240" y="14" text-anchor="middle" fill="#9aa7b6" font-size="11">front view: tone</text>
-  <rect x="231" y="34" width="18" height="54" rx="4" fill="none" stroke="#c297ff" stroke-dasharray="3 3" transform="rotate(-25 240 88)"/>
-  <rect x="231" y="34" width="18" height="54" rx="4" fill="none" stroke="#c297ff" stroke-dasharray="3 3" transform="rotate(25 240 88)"/>
-  <rect x="231" y="34" width="18" height="54" rx="4" fill="#c297ff"/>
-  <text x="192" y="44" text-anchor="middle" fill="#f0f6fc" font-size="12">purer</text>
-  <text x="290" y="44" text-anchor="middle" fill="#f0f6fc" font-size="12">richer</text>
-  <text x="240" y="110" text-anchor="middle" fill="#9aa7b6" font-size="10">lean left / right</text>
+<svg viewBox="0 0 330 130" width="100%" role="img" aria-label="Start position: portrait, screen facing you, tilted back about 25 degrees. Tilt the top toward you for higher pitch, away for lower. Lean either way for a richer tone; level is a pure tone.">
+  <text x="85" y="13" text-anchor="middle" fill="#9aa7b6" font-size="11">side view: start + pitch</text>
+  <circle cx="14" cy="60" r="9" fill="none" stroke="#9aa7b6" stroke-width="2"/>
+  <text x="14" y="84" text-anchor="middle" fill="#9aa7b6" font-size="9">you</text>
+  <rect x="79" y="36" width="12" height="56" rx="3" fill="none" stroke="#58d1ff" stroke-dasharray="3 3" transform="rotate(5 85 92)"/>
+  <rect x="79" y="36" width="12" height="56" rx="3" fill="none" stroke="#58d1ff" stroke-dasharray="3 3" transform="rotate(45 85 92)"/>
+  <rect x="79" y="36" width="12" height="56" rx="3" fill="#3fb950" transform="rotate(25 85 92)"/>
+  <text x="46" y="38" text-anchor="middle" fill="#f0f6fc" font-size="11">higher</text>
+  <text x="140" y="56" text-anchor="middle" fill="#f0f6fc" font-size="11">lower</text>
+  <text x="85" y="112" text-anchor="middle" fill="#3fb950" font-size="10">green = start: tilted back ≈25°</text>
+  <text x="85" y="125" text-anchor="middle" fill="#9aa7b6" font-size="10">top toward you / away</text>
+  <text x="255" y="13" text-anchor="middle" fill="#9aa7b6" font-size="11">front view: tone</text>
+  <rect x="246" y="36" width="18" height="56" rx="4" fill="none" stroke="#c297ff" stroke-dasharray="3 3" transform="rotate(-25 255 92)"/>
+  <rect x="246" y="36" width="18" height="56" rx="4" fill="none" stroke="#c297ff" stroke-dasharray="3 3" transform="rotate(25 255 92)"/>
+  <rect x="246" y="36" width="18" height="56" rx="4" fill="#c297ff"/>
+  <text x="255" y="30" text-anchor="middle" fill="#f0f6fc" font-size="10">level = pure</text>
+  <text x="205" y="56" text-anchor="middle" fill="#f0f6fc" font-size="11">richer</text>
+  <text x="305" y="56" text-anchor="middle" fill="#f0f6fc" font-size="11">richer</text>
+  <text x="255" y="112" text-anchor="middle" fill="#9aa7b6" font-size="10">lean either way</text>
+  <text x="255" y="125" text-anchor="middle" fill="#9aa7b6" font-size="10">(like a steering wheel)</text>
 </svg>`; // no sensor values this long after enabling → unavailable
 
 export function mount(root, params) {
@@ -64,6 +70,7 @@ export function mount(root, params) {
   // One big button that always does the next step; its label changes.
   el.primary = h('button', { class: 'pc-btn primary', onclick: () => primaryAction && primaryAction() }, 'Enable Sensors');
   el.step = h('div', { class: 'pc-step' });
+  el.hold = h('div', { class: 'pc-hold' });
   el.calibrate = h('button', { class: 'pc-btn', onclick: () => command('calibrate'), hidden: true }, 'Recalibrate');
   el.mute = h('button', { class: 'pc-btn danger', onclick: () => command('panic') }, 'Emergency Mute');
   let primaryAction = null;
@@ -75,8 +82,8 @@ export function mount(root, params) {
   el.sideBar = h('div', { class: 'pc-bar-fill' });
   el.sideText = h('span', { class: 'mono' }, '—');
   el.sideRow = h('div', {},
-    h('div', { class: 'pc-live-row' }, h('span', {}, 'Lean → harmonic richness'), el.sideText),
-    h('div', { class: 'pc-bar side' }, h('div', { class: 'pc-bar-mid' }), el.sideBar));
+    h('div', { class: 'pc-live-row' }, h('span', {}, 'Sideways lean → richness'), el.sideText),
+    h('div', { class: 'pc-bar side' }, el.sideBar));
   // Expression slider (Steady sustain); kept in sync with the laptop.
   el.expr = h('input', { type: 'range', min: 0, max: 100, step: 1, value: 60, 'aria-label': 'Expression' });
   el.exprOut = h('span', { class: 'mono' }, '60%');
@@ -99,8 +106,10 @@ export function mount(root, params) {
     h('h1', {}, 'Motion Score · Phone Controller'),
     h('p', { class: 'pc-small' }, 'This phone is the controller. The sound plays on the laptop.'),
     el.form,
-    h('section', { class: 'pc-action' }, el.step, el.next, el.primary),
+    h('section', { class: 'pc-action' }, el.step, el.next, el.hold, el.primary),
     h('div', { class: 'pc-buttons' }, el.calibrate, el.mute),
+    h('div', { class: 'pc-figure', html: PHONE_FIGURE }),
+    el.howTo,
     h('section', { class: 'pc-status' },
       statusRow('Connection', el.conn),
       statusRow('Sensors', el.sensors),
@@ -115,8 +124,6 @@ export function mount(root, params) {
       el.hit),
     h('p', { class: 'pc-keep' }, 'Keep this page open and your phone unlocked.'),
     el.exprBox,
-    el.howTo,
-    h('div', { class: 'pc-figure', html: PHONE_FIGURE }),
     h('details', { class: 'pc-help' },
       h('summary', {}, 'Troubleshooting'),
       h('ul', {},
@@ -352,7 +359,7 @@ export function mount(root, params) {
     } else if (!connected) next = 'Sensors on. Connecting to the laptop… Keep this page open.';
     else if (!L || L.calib === 'running' || L.calib === 'none') {
       step = 'Step 2 of 3';
-      next = L && L.calib === 'running' ? L.calibText : 'Hold your phone comfortably and stay still: calibrating…';
+      next = L && L.calib === 'running' ? L.calibText : 'Get into the start position (picture below): portrait, screen facing you, tilted back slightly, level. Then stay still.';
     } else if (L.calib !== 'done') {
       step = 'Step 2 of 3';
       next = L.calibText || 'Calibration needed.';
@@ -403,14 +410,20 @@ export function mount(root, params) {
     const tiltMap = !L || L.mapping === 'tilt';
     el.sideRow.hidden = !tiltMap;
     if (L && L.sideRel !== null && L.richness !== null) {
-      const u = Math.max(-1, Math.min(1, (L.richness - 0.5) * 2));
-      el.sideBar.style.left = u < 0 ? `${50 + u * 50}%` : '50%';
-      el.sideBar.style.width = `${Math.abs(u) * 50}%`;
-      el.sideText.textContent = `${Math.round(L.richness * 100)}% (${L.sideRel > 0 ? '+' : ''}${L.sideRel.toFixed(0)}°)`;
+      el.sideBar.style.left = '0';
+      el.sideBar.style.width = `${Math.round(L.richness * 100)}%`;
+      const inDz = Math.abs(L.sideRel) <= L.deadZone;
+      el.sideText.textContent = `lean ${L.sideRel > 0 ? '+' : ''}${L.sideRel.toFixed(0)}°${inDz ? ' (level)' : ''} → ${Math.round(L.richness * 100)}%${L.richLocked ? ' 🔒' : ''}`;
     } else {
       el.sideBar.style.width = '0';
       el.sideText.textContent = L && !L.sideAvailable ? 'not available on this phone' : st.sensors === 'active' ? 'calibrate first' : '—';
     }
+    // Holding-position check, computed on the phone from its own orientation.
+    const calibrated = L && L.calib === 'done';
+    const hc = st.sensors === 'active' && features.up ? holdCheck(features.up, { ignoreLean: calibrated }) : null;
+    const showHold = hc && (!calibrated || hc.level !== 'good');
+    el.hold.textContent = showHold ? `${hc.level === 'good' ? '✓' : '⚠'} ${hc.text}` : '';
+    el.hold.className = `pc-hold ${hc ? hc.level : ''}`;
     el.intLabel.textContent = tiltMap ? 'Movement (only used by Movement expression)' : 'Movement → richness';
     el.exprBox.hidden = !(L && L.mode === 'flow' && L.exprSource === 'sustain');
     if (L && !draggingExpr) {
@@ -418,7 +431,7 @@ export function mount(root, params) {
       el.exprOut.textContent = `${Math.round(L.exprLevel * 100)}%`;
     }
     el.howTo.textContent = tiltMap
-      ? 'Hold the phone upright, screen facing you. Tilt the top toward you = higher pitch, away = lower. Lean it left or right like a steering wheel: left = purer tone, right = richer tone.' + (L && !L.sideAvailable ? ' This phone is not reporting sideways lean, so richness stays at medium.' : '')
+      ? 'Start position: portrait, screen facing you, tilted back slightly (not flat), level. Tilt the top toward you = higher pitch, away = lower. Lean either way like a steering wheel = richer tone; back to level = pure tone.' + (L && !L.sideAvailable ? ' This phone is not reporting sideways lean, so the tone stays pure.' : '')
       : 'Hold the phone upright, screen facing you. Tilt the top toward you for higher pitch, away for lower. Move harder for a richer, stronger sound.';
     el.intBar.style.left = '0';
     el.intBar.style.width = `${Math.round((L ? L.intensity : 0) * 100)}%`;

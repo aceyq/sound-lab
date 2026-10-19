@@ -62,6 +62,7 @@ export class MotionFeatures {
     this.tilt = null;
     this.tiltSrc = null;
     this.side = null;
+    this.up = null; // "up" in the phone's own axes (unit vector)
     this.lastOrientT = -Infinity;
     this.invalid = 0;
   }
@@ -77,9 +78,9 @@ export class MotionFeatures {
     if (dt !== null && dt <= 0) return; // duplicate or out-of-order event
     if (dt !== null && dt > GAP_SEC) {
       // Long gap: old filter state no longer describes the phone's motion.
-      const keep = [this.tilt, this.tiltSrc, this.side, this.lastOrientT];
+      const keep = [this.tilt, this.tiltSrc, this.side, this.up, this.lastOrientT];
       this.reset();
-      [this.tilt, this.tiltSrc, this.side, this.lastOrientT] = keep;
+      [this.tilt, this.tiltSrc, this.side, this.up, this.lastOrientT] = keep;
     }
     const step = this.prevT === null ? null : (tMs - this.prevT) / 1000;
     this.prevT = tMs;
@@ -135,6 +136,12 @@ export class MotionFeatures {
     this.tilt = wrapDeg(beta);
     this.tiltSrc = 'orientation';
     this.side = Number.isFinite(gamma) ? sideLean(beta, gamma) : null;
+    if (Number.isFinite(gamma)) {
+      // "Up" (opposite of gravity) in the phone's own axes, from beta/gamma.
+      const b = (beta * Math.PI) / 180;
+      const g = (gamma * Math.PI) / 180;
+      this.up = [-Math.sin(g) * Math.cos(b), Math.sin(b), Math.cos(g) * Math.cos(b)];
+    } else this.up = null;
     this.lastOrientT = tMs;
   }
 
@@ -144,6 +151,7 @@ export class MotionFeatures {
       tilt: this.tilt === null ? null : Math.round(this.tilt * 100) / 100,
       tiltSrc: this.tilt === null ? null : this.tiltSrc,
       side: this.side === null || this.tiltSrc !== 'orientation' ? null : Math.round(this.side * 100) / 100,
+      up: this.up === null || this.tiltSrc !== 'orientation' ? null : this.up.map((v) => Math.round(v * 10000) / 10000),
       lin: this.lin === null ? null : Math.min(200, Math.round(this.lin * 1000) / 1000),
       linSrc: this.lin === null ? null : this.linSrc,
       jerk: this.lin === null ? null : Math.min(100000, Math.round(this.jerkPeak * 10) / 10),

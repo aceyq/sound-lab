@@ -1,5 +1,14 @@
 # Motion Score update: independent pitch and timbre
 
+> **Revised after phone testing (calibration and gesture separation):**
+> - Tilt and lean are now measured from the direction of gravity in the phone's own frame, relative to the calibrated position. Raw Euler angles are no longer subtracted.
+> - Holding the phone level (neutral) gives a **pure tone**. Leaning either way past a ±5° dead zone adds harmonics, and returning to level makes it pure again.
+> - Calibration explains and checks the start position.
+> - A live readout shows tilt, lean and richness together.
+> - **Lock richness** holds the harmonic recipe.
+>
+> See "Calibration and gesture-separation revision" at the end. The sections below describe the first version; where they disagree, the revision wins.
+
 Live: https://aceyq.github.io/sound-lab/#/motion-score
 
 ## 1. What changed
@@ -105,3 +114,71 @@ See SPEAKER_NOTES.md → "Part 2 · Motion Score" for the full version with clic
 7. **[Disarm or Mute / Panic.]** "Tilt moves the fundamental and everything with it; leaning changes the harmonic amplitudes while the fundamental stays fixed."
 
 **No phone:** Laptop Demo → Start Audio → **▶ Auto demo (simulated)**. Narrate the three steps, and say the input is simulated.
+
+
+---
+
+## Calibration and gesture-separation revision
+
+### What changed
+
+- **Start position, explained and checked.** Setup step 3 and the phone both show a picture and steps for the start position: portrait, screen facing you, tilted back slightly (about 10–45° from upright, not flat), and level. Calibration now gives 2.5 s to get into position, then measures for 2 s.
+  - A live check tells you if the position is unreliable and how to fix it: nearly flat, tilted past upright toward you, leaning, or upside down.
+  - Calibration refuses an unreliable position and explains why.
+  - A position that is merely "quite flat" gets a warning.
+- **Orientation-relative mapping.**
+  - **How it's measured:** the phone sends the direction of "up" in its own axes, computed from beta/gamma.
+  - **Forward/back tilt** = rotation about the phone's left–right axis, atan2(up_z, up_y).
+  - **Sideways lean** = how far the left–right axis tips from level, asin(up_x).
+  - **Reference:** both are measured relative to the calibrated position. Compass heading and Euler-angle wrapping no longer matter.
+  - **Separation:** a pure forward/back tilt cannot change the lean reading.
+  - **Rotation:** turning the screen out of portrait still asks you to recalibrate.
+- **Neutral = pure tone.** Within ±5° of level the tone stays pure; the dead zone is adjustable from 0 to 15° under ⚙ in Setup step 3. Beyond that, leaning either way raises richness smoothly from 0, with no jump, up to 100% at ±30° (also adjustable).
+- **Smoother fades.** Each harmonic now fades in over an overlapping stretch, so the timbre changes more gradually.
+- **Live gesture readout** under the value cards: forward/back tilt in degrees, sideways lean in degrees (inside or past the dead zone), richness, and the position check. The phone shows the same numbers.
+- **Lock richness** holds the current harmonic recipe while you demonstrate pitch. It complements Lock fundamental.
+- **Updated guidance.** The tour, phone instructions and illustration, the auto demo (step 3 now uses Lock richness), PRESENTATION_NOTES.md and SPEAKER_NOTES.md all describe this mapping.
+- **Unchanged:** the Movement intensity mapping still works as before, and now also uses the better pitch measurement when available.
+
+### Checks actually performed
+
+All automated or simulated. **Physical gesture separation has NOT been verified on a phone.**
+
+- **Unit tests: 51 passed.** They include simulated orientation cases:
+  - The up vector matches the W3C rotation model.
+  - Two Euler forms of the same physical orientation give identical gestures.
+  - A pure forward/back rotation (about the phone's left–right axis) from start positions 0–60° back and 0–8° lean changes the lean reading by less than 0.000001°.
+  - A steering-wheel turn reads as lean = asin(sin turn · cos tilt-back), at least 85% of the turn when held 25° back or less, with a pitch side effect under 5°.
+  - The forward/back angle wraps correctly at ±180°.
+  - The holding-position check catches flat, past-upright, leaning and upside-down positions.
+  - Dead-zone and symmetry rules hold, with no jump at the edge.
+  - Tilt alone keeps the tone pure; lean either way adds harmonics; returning to level makes it pure again.
+  - Lock richness holds the recipe.
+  - Calibration rejects a flat phone with instructions.
+- **Browser checks: 67 passed**, run with a simulated phone over real PeerJS pairing, on localhost and on the live site. They covered:
+  - forward/back tilt alone at 0% richness throughout;
+  - level = pure, and leaning either way = full richness;
+  - smooth gain fades;
+  - Lock richness holding the exact recipe while the pitch moved from 573 Hz to 172 Hz;
+  - everything from before.
+- **Frequency Playground:** 36 checks passed.
+- **Production build** succeeded.
+
+### Physical phone test (about 3 minutes)
+
+1. Open https://aceyq.github.io/sound-lab/#/motion-score on the laptop, then scan the QR code. On the phone, tap **Enable Sensors** and allow access.
+2. **Calibration.** During the countdown, hold the start position shown in the picture: portrait, screen facing you, tilted back slightly, level. The phone should show "✓ Good position". On purpose, also try holding the phone flat on a table and calibrating. It should refuse and say "almost flat". Then recalibrate in the good position.
+3. **Start Audio** on the laptop, **Arm** on the phone. Holding the start position, you should hear a pure tone and see **Richness 0%**.
+4. **Tilt only.** Tilt the top toward you and away 3–4 times without turning the phone. Watch the live readout on the laptop:
+   - the **forward/back tilt** number should swing a lot;
+   - the **sideways lean** number should stay within about ±5° ("inside dead zone");
+   - richness should stay at **0%**.
+
+   If richness rises, check the lean number. If the lean number moved, the phone actually turned. If the lean stayed near 0° but richness rose anyway, note it down; that would be a bug.
+5. **Lean only.** Turn the phone like a steering wheel, first left and then right, without tilting:
+   - richness should rise in both directions;
+   - the pitch should stay steady, with a small drift at most;
+   - when you return to level, the tone should be pure again.
+6. Optionally change **Sideways dead zone** to 10°, and check that small accidental turns no longer add harmonics.
+7. **Locks.** Tick **Lock fundamental**, lean, and check that the pitch stays at 200 Hz. Untick it. Lean to a medium amount, tick **Lock richness**, then tilt: only the pitch should change.
+8. Write down which steps passed. That is the only evidence that physical separation works on your phone.

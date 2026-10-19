@@ -106,6 +106,11 @@ export function validatePhoneMessage(m) {
       if (!num(m.t, 0, 1e12)) return { ok: false, error: 'bad timestamp' };
       if (!numOrNull(m.tilt, -180, 180)) return { ok: false, error: 'tilt out of range' };
       if (m.side !== undefined && !numOrNull(m.side, -90, 90)) return { ok: false, error: 'sideways tilt out of range' };
+      if (m.up !== undefined && m.up !== null) {
+        if (!Array.isArray(m.up) || m.up.length !== 3 || !m.up.every((v) => num(v, -1.01, 1.01))) return { ok: false, error: 'bad orientation vector' };
+        const len = Math.hypot(m.up[0], m.up[1], m.up[2]);
+        if (len < 0.95 || len > 1.05) return { ok: false, error: 'orientation vector not unit length' };
+      }
       if (!numOrNull(m.lin, 0, 200)) return { ok: false, error: 'intensity out of range' };
       if (!numOrNull(m.jerk, 0, 100000)) return { ok: false, error: 'jerk out of range' };
       if (!num(m.screen, -360, 360)) return { ok: false, error: 'bad screen angle' };
@@ -117,6 +122,7 @@ export function validatePhoneMessage(m) {
         msg: {
           type: 'sample', seq: m.seq, t: m.t, tilt: m.tilt, tiltSrc: m.tilt === null ? null : m.tiltSrc,
           side: m.side === undefined ? null : m.side,
+          up: Array.isArray(m.up) ? (() => { const L = Math.hypot(m.up[0], m.up[1], m.up[2]); return m.up.map((v) => v / L); })() : null,
           lin: m.lin, linSrc: m.lin === null ? null : m.linSrc, jerk: m.jerk, screen: m.screen, rate: m.rate,
         },
       };
@@ -148,6 +154,10 @@ export function validateLaptopMessage(m) {
         tiltRel: num(m.tiltRel, -180, 180) ? m.tiltRel : null,
         intensity: num(m.intensity, 0, 1) ? m.intensity : 0,
         sideRel: num(m.sideRel, -180, 180) ? m.sideRel : null,
+        deadZone: num(m.deadZone, 0, 45) ? m.deadZone : 5,
+        richLocked: m.richLocked === true,
+        hold: ['good', 'warn', 'bad'].includes(m.hold) ? m.hold : null,
+        holdText: String(m.holdText || '').slice(0, 200),
         richness: num(m.richness, 0, 1) ? m.richness : null,
         mapping: m.mapping === 'intensity' ? 'intensity' : 'tilt',
         exprSource: m.exprSource === 'movement' ? 'movement' : 'sustain',

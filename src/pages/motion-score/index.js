@@ -9,7 +9,7 @@ import { SpectrumView, findPeaks, isSilent } from '../frequency/spectrum.js';
 import { SessionHost } from './connection.js';
 import { controllerUrl, isLocalOnly, SAMPLE_RATE_HZ } from './protocol.js';
 import * as M from './mapping.js';
-import { Instrument, LOCK_MIN_HZ, LOCK_MAX_HZ } from './instrument.js';
+import { Instrument, LOCK_MIN_HZ, LOCK_MAX_HZ, DEMO_TILT_BACK } from './instrument.js';
 import { MotionSynth } from './synth.js';
 import { MovementScore, WaveScope, C } from './viz.js';
 import { HONESTY, MAPPINGS, MODE_TEXT, PITCH_TEXT, HOW, ZOOM_STEPS, PERFORMANCE_30S, MAPPING_TEXT, EXPR_TEXT, AUTO_DEMO } from './content.js';
@@ -58,6 +58,10 @@ export function mount(root) {
   el.sens = h('input', { type: 'range', min: 0.5, max: 2, step: 0.05, value: 1, 'aria-label': 'Sensitivity', oninput: () => { inst.settings.sensitivity = Number(el.sens.value); render(); } });
   el.sensOut = h('span', { class: 'mono' }, '1.00×');
   el.invert = h('input', { type: 'checkbox', onchange: () => { inst.settings.invertTilt = el.invert.checked; render(); } });
+  el.dz = h('input', { type: 'range', min: 0, max: 15, step: 1, value: M.DEAD_ZONE, 'aria-label': 'Sideways dead zone', oninput: () => { inst.settings.deadZone = Number(el.dz.value); render(); pushState(); } });
+  el.dzOut = h('span', { class: 'mono' }, `±${M.DEAD_ZONE}°`);
+  el.sr = h('input', { type: 'range', min: 15, max: 45, step: 1, value: M.SIDE_RANGE, 'aria-label': 'Lean for full richness', oninput: () => { inst.settings.sideRange = Number(el.sr.value); render(); } });
+  el.srOut = h('span', { class: 'mono' }, `${M.SIDE_RANGE}°`);
   el.calValues = h('div', { class: 'mono help' });
 
   // Status bar (always visible, also in Presentation Mode).
@@ -121,13 +125,25 @@ export function mount(root) {
     help('Connect Phone shows a QR code for your phone. No phone, or the network blocks pairing? Use Laptop Demo (simulated input).'),
     el.pairing, explain(0)));
   el.step2 = step(2, 'Enable Sensors on Phone', 'on phone', help('On the phone, tap the big Enable Sensors button and choose Allow. The status bar then shows Sensors: Active.'));
+  el.holdLive = h('div', { class: 'ms-hold' });
   el.step3 = step(3, 'Calibrate', 'automatic', h('div', {},
-    h('div', { class: 'row gap wrap' }, el.calBtn, h('span', { class: 'help inline' }, 'Starts by itself when the sensors turn on: hold the phone comfortably and still for 3 s. Sets your neutral tilt and the sensor noise at rest. Use the button to redo it.')),
+    h('div', { class: 'ms-hold-guide' },
+      holdDiagram(),
+      h('ol', { class: 'ms-hold-steps' },
+        h('li', {}, h('strong', {}, 'Portrait'), ', screen facing you, held comfortably in one hand.'),
+        h('li', {}, h('strong', {}, 'Tilted back slightly'), ' (about 10–45° from upright), not lying flat.'),
+        h('li', {}, h('strong', {}, 'Level'), ': not leaning left or right.'),
+        h('li', {}, 'Stay still for 3 s. This position becomes ', h('strong', {}, 'neutral'), ': middle pitch, pure tone.'))),
+    el.holdLive,
+    h('div', { class: 'row gap wrap' }, el.calBtn, h('span', { class: 'help inline' }, 'Starts by itself when the sensors turn on: get into the start position, then stay still. Sets neutral (middle pitch, pure tone) and the sensor noise at rest. Use the button to redo it.')),
     el.calText,
     h('details', { class: 'ms-explain' }, h('summary', {}, '⚙ Adjust sensitivity and tilt direction'),
       h('label', { class: 'row gap ms-vol' }, h('span', {}, 'Sensitivity'), el.sens, el.sensOut),
       help('Higher sensitivity: smaller movements reach 100% intensity and lighter flicks count as accents. Raise it if the sound stays quiet; lower it if the sound never goes silent.'),
       h('label', { class: 'check' }, el.invert, ' Invert tilt (tilt away from you = higher)'),
+      h('label', { class: 'row gap ms-vol' }, h('span', {}, 'Sideways dead zone'), el.dz, el.dzOut),
+      help('Lean smaller than this (either way) still gives a pure tone, so small unintended lean adds no harmonics. Richness then rises smoothly from 0, with no jump.'),
+      h('label', { class: 'row gap ms-vol' }, h('span', {}, 'Lean for full richness'), el.sr, el.srOut),
       el.calValues),
     explain(6)));
   el.step4 = step(4, 'Start Audio and Arm Phone', 'laptop (Arm also on phone)', h('div', {},
@@ -147,7 +163,7 @@ export function mount(root) {
     return { root: h('div', { class: 'pv-card' }, h('div', { class: 'pv-label' }, label, id ? info(id, label) : null), v, s), v, s };
   };
   el.vF = value('Fundamental', '← tilt', 'fundamental');
-  el.vH = value('Harmonic richness', '← lean left / right', 'harmonics');
+  el.vH = value('Harmonic richness', '← lean either way', 'harmonics');
   el.vE = value('Expression', 'signal strength', 'expression');
   el.vMode = value('Mode', '', 'mode');
   el.modeFlow = btn('Flow', () => setMode('flow'), 'btn seg');
@@ -179,6 +195,18 @@ export function mount(root) {
   el.lockOn = h('input', { type: 'checkbox', onchange: () => setLock(el.lockOn.checked) });
   el.lockHz = h('input', { type: 'number', min: LOCK_MIN_HZ, max: LOCK_MAX_HZ, step: 1, value: 200, class: 'num small', 'aria-label': 'Locked fundamental in Hz', onchange: () => setLock(el.lockOn.checked) });
   el.lockText = h('p', { class: 'ms-mode-text' });
+  el.richLockOn = h('input', { type: 'checkbox', onchange: () => setRichLock(el.richLockOn.checked) });
+  el.richLockText = h('p', { class: 'ms-mode-text' });
+  // Live gesture readout: sensor angles and the resulting richness side by side.
+  el.gTilt = h('span', { class: 'mono' });
+  el.gLean = h('span', { class: 'mono' });
+  el.gRich = h('span', { class: 'mono' });
+  el.gHold = h('span', {});
+  el.gesture = h('div', { class: 'ms-gesture', 'aria-label': 'Live gesture readout' },
+    h('span', { class: 'ms-g' }, h('b', { style: { color: C.pitch } }, 'Forward/back tilt '), el.gTilt, ' → pitch'),
+    h('span', { class: 'ms-g' }, h('b', { style: { color: C.harm } }, 'Sideways lean '), el.gLean),
+    h('span', { class: 'ms-g' }, h('b', { style: { color: C.harm } }, 'Richness '), el.gRich),
+    el.gHold);
   el.pCont = btn('Continuous', () => setPitchMode('continuous'), 'btn seg');
   el.pPent = btn('Pentatonic', () => setPitchMode('pentatonic'), 'btn seg');
   el.stopBtn = btn('■ Stop Audio', () => stopAudio(), 'btn');
@@ -227,6 +255,7 @@ export function mount(root) {
   el.play = h('section', { class: 'card ms-play' },
     h('div', { class: 'viz-head' }, h('h2', {}, 'B · Play'), h('div', { class: 'row gap wrap' }, el.freezeBtn, el.guideBtn, el.presentBtn)),
     h('div', { class: 'pv-row ms-values' }, el.vF.root, el.vH.root, el.vE.root, el.vMode.root),
+    el.gesture,
     el.mapCtl = h('div', { class: 'ms-mapping' },
       h('div', { class: 'ms-ctl-title' }, 'Mapping: which movement shapes the tone ', info('mapping', 'the mapping selector')),
       h('div', { class: 'seg-group' }, el.mapTilt, el.mapInt), el.mapText),
@@ -236,7 +265,9 @@ export function mount(root) {
         h('p', { class: 'ms-mode-text muted' }, 'Pentatonic is like a piano where every key you can land on fits together, so any movement sounds musical.'),
         el.lockCtl = h('div', { class: 'ms-sub' },
           h('label', { class: 'check' }, el.lockOn, h('strong', {}, ' Lock fundamental at '), el.lockHz, ' Hz ', info('lock', 'Lock fundamental')),
-          el.lockText)),
+          el.lockText,
+          el.richLockCtl = h('label', { class: 'check' }, el.richLockOn, h('strong', {}, ' Lock richness '), info('richlock', 'Lock richness')),
+          el.richLockText)),
       el.audioCtl = h('div', { class: 'ms-ctl' }, h('div', { class: 'ms-ctl-title' }, 'Audio ', info('audio', 'the audio controls')),
         h('div', { class: 'row gap wrap' }, el.startBtn2, el.stopBtn, el.armBtn2),
         h('label', { class: 'row gap ms-vol' }, h('span', {}, 'Master Volume'), el.vol, el.volOut),
@@ -325,20 +356,20 @@ export function mount(root) {
       body: 'Five separate lights. Phone = can the phone talk to the laptop. Sensors = is motion data arriving. Control = Armed means movement is allowed to make sound. Audio = is the laptop\'s sound engine on. On the right it says why it is silent, if it is.',
       tryIt: 'Point at each light as you go through setup; they turn green one by one.' },
     { id: 'setup', target: () => el.setup.querySelector('.ms-step.next') || el.setup, title: 'Setup: four steps, the next one is highlighted',
-      body: 'Scan the QR code with the phone, tap Enable Sensors on the phone, hold still while it calibrates (both forward/back tilt and sideways lean), then Start Audio and Arm. Pairing never makes sound on its own.',
+      body: 'Scan the QR code with the phone and tap Enable Sensors. Then hold the phone in the start position, portrait, screen facing you, tilted back slightly (not flat), level, and stay still while it calibrates. That position becomes neutral: middle pitch and a pure tone. The page says if the position is unreliable and how to fix it. Then Start Audio and Arm.',
       tryIt: 'Follow whichever step says NEXT.' },
     { id: 'panic', target: () => el.panic, title: 'Mute / Panic: the emergency stop',
       body: 'Silences instantly and disarms. It stays silent, even if the phone keeps moving, until you press Start Audio again. The phone has the same button (Emergency Mute).',
       tryIt: 'Know where it is before you start.' },
     { id: 'mapping', target: () => el.mapCtl, title: 'Mapping: which movement shapes the tone',
-      body: 'Tilt instrument (the default) gives pitch and tone separate gestures: forward/back tilt is pitch, sideways lean is harmonic richness, so you can change one while holding the other. Movement intensity is the original mapping, where moving harder adds harmonics and loudness together.',
+      body: 'Tilt instrument (the default) gives pitch and tone separate gestures: forward/back tilt is pitch, sideways lean is harmonic richness. Both are measured relative to the position you calibrated, from the direction of gravity in the phone\'s own frame, so tilting forward/back does not register as lean. Movement intensity is the original mapping, where moving harder adds harmonics and loudness together.',
       tryIt: 'Stay on Tilt instrument for the harmonics demo.' },
     { id: 'fundamental', target: () => el.vF.root, title: 'Fundamental: the base frequency',
       body: 'The fundamental is the base frequency of this harmonic sound, from 110 Hz (low A) to 880 Hz (high A). Tilting the top of the phone toward you raises it; away lowers it. Every harmonic is a multiple of it, so they all move together.',
       tryIt: 'Tilt slowly toward and away from you and watch the Hz number move.' },
     { id: 'harmonics', target: () => el.vH.root, title: 'Harmonic richness: how many harmonics you hear',
-      body: 'Lean the phone left (like a steering wheel) for a pure sine: only the fundamental. Lean right and higher harmonics fade in one after another until all 12 are present. The pitch does not change; the tone gets brighter and buzzier. That tone quality is called timbre.',
-      tryIt: 'Hold the pitch steady and lean slowly from left to right.' },
+      body: 'Held level, as you calibrated it, the phone plays a pure sine: only the fundamental. Lean it either way, like turning a steering wheel, and once you pass a small dead zone (±5°) higher harmonics fade in one after another, all 12 by about 30°. Come back to level and it is pure again. The pitch does not change; the tone gets brighter and buzzier. That tone quality is called timbre.',
+      tryIt: 'Hold the pitch steady and lean slowly to one side, then back to level.' },
     { id: 'expression', target: () => el.vE.root, title: 'Expression: signal strength',
       body: 'Expression is how strong the signal is. With Steady sustain it is a slider (on the laptop or the phone; they stay in sync), so the tone keeps sounding while you explore. With Movement expression it follows how hard you move. Master Volume is separate: it is just your listening level.',
       tryIt: 'Move the Expression slider on the phone and watch this card follow.' },
@@ -350,10 +381,16 @@ export function mount(root) {
       tryIt: 'Choose Pentatonic and tilt slowly: the Hz jumps in steps.' },
     { id: 'lock', target: () => el.lockCtl, title: 'Lock fundamental: hear only the harmonics change',
       body: 'Tick it to hold the pitch at the Hz you type (200 Hz is easy: harmonics at 400, 600, 800…). Forward/back tilt and Pentatonic then do not change the pitch, but sideways lean still changes the harmonics. Untick it to get tilt control back.',
-      tryIt: 'Lock at 200 Hz, then lean left and right.' },
+      tryIt: 'Lock at 200 Hz, then lean to one side and back to level.' },
+    { id: 'richlock', target: () => el.richLockCtl, title: 'Lock richness: hear only the pitch change',
+      body: 'Holds the current harmonic recipe. Leaning then does nothing, so when you tilt forward/back you hear only the pitch move, with every harmonic moving along with it. It complements Lock fundamental, which does the opposite.',
+      tryIt: 'Lean to a medium richness, tick Lock richness, then tilt toward and away from you.' },
+    { id: 'gesture', target: () => el.gesture, title: 'Live gesture readout',
+      body: 'Shows the two sensor angles and the richness they produce, side by side: forward/back tilt (→ pitch), sideways lean (with the dead zone), and richness. If richness changes while you think you only tilted, look at the lean number: it shows whether the phone really leaned.',
+      tryIt: 'Tilt only forward and back: the lean number should stay near 0°.' },
     { id: 'harm-panel', target: () => el.harmPanel, title: 'Harmonics right now',
       body: 'Each row is one harmonic: H1 is the fundamental, Hn is n × f0. The light bar is the recipe amplitude (1/n, faded in by richness). The thin dark bar is what actually goes to the speakers after one shared normalization factor, which keeps the summed wave from clipping.',
-      tryIt: 'At 200 Hz: H1 = 200, H2 = 400, H3 = 600, H4 = 800. Lean right and watch the lower rows fill in first.' },
+      tryIt: 'At 200 Hz: H1 = 200, H2 = 400, H3 = 600, H4 = 800. Lean and watch the lower rows fill in first.' },
     { id: 'audio', target: () => el.audioCtl, title: 'Audio controls',
       body: 'Start Audio turns on the laptop\'s sound engine. Stop Audio turns it off. Arm lets movement control the sound; Disarm pauses it. Master Volume is your listening level; keep it low at first.',
       tryIt: 'Start Audio, then Arm.' },
@@ -364,8 +401,8 @@ export function mount(root) {
       body: 'This is control history from the phone, not measured audio. Time runs left to right; "now" is the right edge. The blue line is the fundamental: higher on the track = higher pitch.',
       tryIt: 'Tilt up and down and draw a wave with the blue line.' },
     { id: 'score-rich', target: track('r'), title: 'Richness track',
-      body: 'Purple shows harmonic richness from sideways lean as a smooth line (H1 at the bottom = only the fundamental, H12 at the top = all harmonics). In the Movement intensity mapping it becomes whole-number steps instead.',
-      tryIt: 'Lean left and right and watch the purple line follow.' },
+      body: 'Purple shows harmonic richness from sideways lean as a smooth line (H1 at the bottom = only the fundamental, H12 at the top = all harmonics). It sits at the bottom while you hold the phone level. In the Movement intensity mapping it becomes whole-number steps instead.',
+      tryIt: 'Lean to one side and back and watch the purple line rise and fall.' },
     { id: 'score-expr', target: track('e'), title: 'Expression track',
       body: 'White shows Expression over time, and its label says where it comes from: steady sustain, movement, or the short note envelope in Accents.',
       tryIt: 'Drag the Expression slider and see this track step up or down.' },
@@ -373,8 +410,8 @@ export function mount(root) {
       body: 'Green is movement intensity: how hard the phone is moving. In the Tilt instrument with Steady sustain it does not change the sound; with Movement expression or the Movement intensity mapping it does. Orange vertical lines mark accent hits.',
       tryIt: 'Shake the phone and watch only this track respond (in the Tilt instrument).' },
     { id: 'spectrogram', target: () => el.sgBox, title: 'Spectrogram: the sound itself',
-      body: 'Measured from the audio the laptop actually plays. Time runs left to right; pitch goes bottom to top; brighter = louder. The lowest bright line is the fundamental, and each line above it is a harmonic. Lean right and more lines appear; tilt and they all move together.',
-      tryIt: 'Lock at 200 Hz and lean right: new lines appear at 400, 600, 800 Hz…' },
+      body: 'Measured from the audio the laptop actually plays. Time runs left to right; pitch goes bottom to top; brighter = louder. The lowest bright line is the fundamental, and each line above it is a harmonic. Lean (either way) and more lines appear; tilt and they all move together.',
+      tryIt: 'Lock at 200 Hz and lean to one side: new lines appear at 400, 600, 800 Hz…' },
     { id: 'freeze', target: () => el.freezeBtn, title: 'Freeze Visual History',
       body: 'Freezes the drawings so you can point at them while you talk. The sound and the safety checks keep running.',
       tryIt: 'Freeze after a short performance and explain the picture.' },
@@ -460,7 +497,9 @@ export function mount(root) {
     const floor = inst.cal.noise * 1.3 + 0.05;
     const sample = {
       type: 'sample', seq: d.seq++, t: performance.now(),
-      tilt: d.tilt, tiltSrc: 'orientation', side: d.side,
+      tilt: d.tilt, tiltSrc: 'orientation', side: -d.side,
+      // Simulated phone held in the recommended position, then tilted/leaned.
+      up: M.upFromAngles(DEMO_TILT_BACK - d.tilt, -d.side),
       lin: d.intensity > 0 ? floor + d.intensity * range : inst.cal.noise * 0.5, linSrc: 'sensor',
       jerk: d.accent ? thr * 3 : 5, screen: 0, rate: SAMPLE_RATE_HZ,
     };
@@ -617,6 +656,13 @@ export function mount(root) {
     pushState();
   }
 
+  function setRichLock(on) {
+    inst.setRichLock(on);
+    el.richLockOn.checked = inst.richLock;
+    render();
+    pushState();
+  }
+
   function setLock(on) {
     const hz = inst.setLock(on, el.lockHz.value);
     el.lockHz.value = Math.round(hz * 10) / 10;
@@ -657,6 +703,7 @@ export function mount(root) {
     autoTimer = 0;
     st.auto = null;
     if (inst.lock.on) setLock(false);
+    if (inst.richLock) setRichLock(false);
     if (msg) feedback(msg);
     render();
   }
@@ -674,15 +721,17 @@ export function mount(root) {
     const u = (t - step.start) / (step.end - step.start); // 0..1 within the step
     if (step.id === 'pure') {
       if (!inst.lock.on || inst.lock.hz !== 200) { el.lockHz.value = 200; setLock(true); }
-      d.side = -30;
+      if (inst.richLock) setRichLock(false);
+      d.side = 0; // neutral = fundamental only
       d.tilt = 0;
     } else if (step.id === 'fade') {
       if (!inst.lock.on) { el.lockHz.value = 200; setLock(true); }
-      d.side = -30 + 60 * Math.min(1, u / 0.85);
+      d.side = 30 * Math.min(1, u / 0.85); // lean right: harmonics fade in
       d.tilt = 0;
     } else {
       if (inst.lock.on) setLock(false);
-      d.side = 6; // harmonic balance held steady (richness ≈ 0.6)
+      if (!inst.richLock) setRichLock(true); // hold the harmonic recipe
+      d.side = 18;
       d.tilt = -35 + 70 * (0.5 - 0.5 * Math.cos(2 * Math.PI * u)); // low → high → low
     }
     el.dTilt.value = Math.round(d.tilt);
@@ -830,6 +879,8 @@ export function mount(root) {
       richness: inst.mapping === 'tilt' ? Math.round(inst.richness * 100) / 100 : null,
       mapping: inst.mapping, exprSource: inst.exprSource, exprLevel: Math.round(inst.exprLevel * 100) / 100,
       sideAvailable: inst.mapping !== 'tilt' || inst.sideAvailable || !inst.cal.done, locked: inst.lock.on,
+      deadZone: inst.settings.deadZone, richLocked: inst.richLock,
+      hold: inst.hold ? inst.hold.level : null, holdText: inst.hold ? inst.hold.text : '',
     };
     host.send(msg);
   }
@@ -1056,8 +1107,10 @@ export function mount(root) {
     if (tiltMap) {
       el.vH.v.textContent = has ? `${Math.round(inst.richness * 100)}%` : '—';
       el.vH.s.textContent = !sideOk
-        ? '⚠ sideways lean unavailable: held at medium'
-        : has ? `harmonics up to ≈${M.richnessToPosition(inst.richness).toFixed(1)} of 12 · ← lean ${inst.sideRel === null ? '' : `${inst.sideRel > 0 ? '+' : ''}${inst.sideRel.toFixed(0)}°`}` : '← lean left / right';
+        ? '⚠ sideways lean unavailable: pure tone'
+        : inst.richLock ? `🔒 LOCKED · harmonics up to ≈H${M.richnessToPosition(inst.richness).toFixed(1)}`
+        : has ? (inst.richness === 0 ? `pure tone (fundamental only) · lean ±${inst.settings.deadZone}° dead zone` : `harmonics up to ≈H${M.richnessToPosition(inst.richness).toFixed(1)} of 12`) : '← lean either way';
+    el.vH.root.classList.toggle('locked', inst.richLock);
     } else {
       el.vH.v.textContent = has ? `${inst.count} of 12` : '—';
       el.vH.s.textContent = has ? `components incl. fundamental · ← movement ${Math.round(inst.intensity * 100)}%` : '← movement intensity';
@@ -1070,7 +1123,26 @@ export function mount(root) {
     el.vMode.s.textContent = `${tiltMap ? 'Tilt instrument' : 'Movement intensity'} · ${inst.lock.on ? 'pitch locked' : inst.pitchMode === 'continuous' ? 'Continuous' : 'Pentatonic'}`;
     el.mapTilt.setAttribute('aria-pressed', String(tiltMap));
     el.mapInt.setAttribute('aria-pressed', String(!tiltMap));
-    el.mapText.textContent = MAPPING_TEXT[inst.mapping] + (tiltMap && !sideOk ? ' ⚠ This phone is not reporting sideways lean, so harmonic richness is held at medium. Use the Movement intensity mapping, or Laptop Demo.' : '');
+    el.mapText.textContent = MAPPING_TEXT[inst.mapping] + (tiltMap && !sideOk ? ' ⚠ This phone is not reporting sideways lean, so the tone stays pure. Use the Movement intensity mapping, or Laptop Demo.' : '');
+    // Live gesture readout.
+    const sgn = (v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(0)}°`;
+    el.gesture.hidden = !tiltMap;
+    el.gTilt.textContent = inst.tiltRel === null ? '—' : sgn(inst.tiltRel);
+    el.gLean.textContent = inst.sideRel === null ? (has && !sideOk ? 'unavailable' : '—')
+      : `${sgn(inst.sideRel)} ${Math.abs(inst.sideRel) <= inst.settings.deadZone ? `(inside ±${inst.settings.deadZone}° dead zone)` : `(past ±${inst.settings.deadZone}°)`}`;
+    el.gRich.textContent = `${Math.round(inst.richness * 100)}%${inst.richLock ? ' 🔒 locked' : ''}`;
+    el.gHold.textContent = inst.hold && inst.source === 'phone' && inst.hold.level !== 'good' ? `⚠ ${inst.hold.text}` : '';
+    el.gHold.className = `ms-g-hold ${inst.hold ? inst.hold.level : ''}`;
+    el.holdLive.textContent = inst.source === 'phone' && inst.hold ? `Right now: ${inst.hold.level === 'good' ? '✓' : '⚠'} ${inst.hold.text}` : inst.source === 'phone' ? 'Right now: waiting for orientation data from the phone.' : '';
+    el.holdLive.className = `ms-hold ${inst.hold ? inst.hold.level : ''}`;
+    el.richLockOn.checked = inst.richLock;
+    el.richLockCtl.hidden = !tiltMap;
+    el.richLockText.hidden = !tiltMap;
+    el.richLockText.textContent = inst.richLock
+      ? '🔒 Richness locked: the harmonic recipe stays as it is while you tilt, so you hear only the pitch change.'
+      : 'Holds the current harmonic recipe so you can demonstrate pitch alone (complements Lock fundamental).';
+    el.dzOut.textContent = `±${inst.settings.deadZone}°`;
+    el.srOut.textContent = `${inst.settings.sideRange}°`;
     el.exCtl.hidden = inst.mode !== 'flow';
     el.exSustain.setAttribute('aria-pressed', String(inst.exprSource === 'sustain'));
     el.exMove.setAttribute('aria-pressed', String(inst.exprSource === 'movement'));
@@ -1110,7 +1182,7 @@ export function mount(root) {
     el.sensOut.textContent = `${inst.settings.sensitivity.toFixed(2)}×`;
     const c = inst.cal;
     el.calValues.textContent = c.done
-      ? `Neutral tilt ${c.neutral.toFixed(1)}° · neutral sideways lean ${c.sideAvailable ? c.neutralSide.toFixed(1) + '°' : 'unavailable'} · stillness noise ${c.noise.toFixed(3)} m/s² · jerk noise ${c.jerkNoise.toFixed(1)} m/s³${c.demo ? ' (Laptop Demo preset)' : ''}`
+      ? `Neutral position: ${c.up0 ? `tilted back ${M.orientAngles(c.up0).tiltBack.toFixed(0)}° from upright, lean ${M.orientAngles(c.up0).lean.toFixed(0)}°` : `beta ${c.neutral.toFixed(1)}° (no orientation vector)`} · dead zone ±${inst.settings.deadZone}° · full richness at ±${inst.settings.sideRange}° · stillness noise ${c.noise.toFixed(3)} m/s² · jerk noise ${c.jerkNoise.toFixed(1)} m/s³${c.demo ? ' (Laptop Demo preset)' : ''}`
       : 'Not calibrated yet.';
     const s = st.rx.lastSample;
     const thr = inst.detector.threshold(inst.cal, inst.settings);
@@ -1120,7 +1192,7 @@ export function mount(root) {
       `Session: ${host.session ? host.session.sessionId : '—'} · messages received ${host.stats.received} · rejected messages ${host.stats.rejectedMessages} · rejected phones ${host.stats.rejectedPhones}${host.stats.lastError ? ` · last error ${host.stats.lastError}` : ''}`,
       `Relay: PeerJS library defaults (Google STUN + PeerJS public TURN); no app-specific TURN server is configured.`,
       `Samples: ${st.rx.times.length}/s received by laptop · phone motion events ${st.rx.phoneRate}/s · last sample age ${Number.isFinite(age) ? Math.round(age) + ' ms' : '—'} · missing samples ${st.rx.seqGaps}`,
-      s ? `Raw tilt (beta): ${s.tilt === null ? 'null' : s.tilt.toFixed(1) + '°'} [${s.tiltSrc || '—'}] · sideways lean: ${s.side === null ? 'null (unavailable)' : s.side.toFixed(1) + '°'} · screen angle ${s.screen}°` : 'Raw tilt: —',
+      s ? `Raw: beta ${s.tilt === null ? 'null' : s.tilt.toFixed(1) + '°'} [${s.tiltSrc || '—'}] · up vector ${s.up ? s.up.map((v) => v.toFixed(3)).join(', ') : 'null (unavailable)'}${s.up ? ` → tilted back ${M.orientAngles(s.up).tiltBack.toFixed(1)}°, lean ${M.orientAngles(s.up).lean.toFixed(1)}°` : ''} · screen angle ${s.screen}°` : 'Raw: —',
       s ? `Linear acceleration (smoothed): ${s.lin === null ? 'null' : s.lin.toFixed(3) + ' m/s²'} [${s.linSrc === 'estimated' ? 'gravity estimated: approximate' : s.linSrc || '—'}] · jerk peak ${s.jerk === null ? 'null' : s.jerk.toFixed(0) + ' m/s³'}` : 'Linear acceleration: —',
       `Relative tilt: ${inst.tiltRel === null ? '—' : inst.tiltRel.toFixed(1) + '°'} → pitch ${inst.f0.toFixed(1)} Hz${inst.lock.on ? ' (locked)' : ''} · sideways ${inst.sideRel === null ? '—' : inst.sideRel.toFixed(1) + '°'} → richness ${Math.round(inst.richness * 100)}% · intensity ${Math.round(inst.intensity * 100)}% · accent threshold ${thr.toFixed(0)} m/s³ · accents ${inst.hits}`,
       `Synth: ${synth.liveOscillators} oscillators running · normalization ×${synth.mix.norm.toFixed(3)} (recipe peak ${synth.mix.peak.toFixed(3)})`,
@@ -1150,6 +1222,7 @@ export function mount(root) {
       richness: inst.richness, weights: inst.weights.slice(), synthWeights: synth.weights.slice(), mix: { ...synth.mix },
       liveGains: synth.liveGains(), oscFreqs: synth.voices ? synth.voices.oscs.map((o) => o.frequency.value) : [],
       liveOscillators: synth.liveOscillators, sideAvailable: inst.sideAvailable, sideRel: inst.sideRel, auto: st.auto ? st.auto.step : null,
+      richLock: inst.richLock, hold: inst.hold, deadZone: inst.settings.deadZone,
     }),
     measuredPeaks: () => {
       if (!synth.running) return [];
@@ -1188,6 +1261,24 @@ function pct(v) {
   return `${Math.round(v * 100)}%`;
 }
 
+/** Recommended starting position (side view) for calibration. */
+function holdDiagram() {
+  const wrap = document.createElement('div');
+  wrap.className = 'ms-tilt-diagram';
+  wrap.innerHTML = `
+  <svg viewBox="0 0 220 130" width="220" height="130" role="img" aria-label="Recommended position: phone in portrait, screen facing you, top tilted back about 25 degrees from upright.">
+    <text x="110" y="13" text-anchor="middle" fill="#9aa7b6" font-size="11">start here (side view)</text>
+    <circle cx="22" cy="62" r="11" fill="none" stroke="#9aa7b6" stroke-width="2"/>
+    <text x="22" y="90" text-anchor="middle" fill="#9aa7b6" font-size="10">you</text>
+    <line x1="120" y1="104" x2="120" y2="30" stroke="#5b6b7d" stroke-dasharray="3 3"/>
+    <rect x="114" y="44" width="12" height="60" rx="3" fill="#3fb950" transform="rotate(25 120 104)"/>
+    <path d="M120 52 A 52 52 0 0 1 142 57" fill="none" stroke="#f0f6fc" stroke-width="1.5"/>
+    <text x="160" y="48" fill="#f0f6fc" font-size="12" font-weight="700">≈25° back</text>
+    <text x="110" y="124" text-anchor="middle" fill="#9aa7b6" font-size="10">screen faces you · not flat · not leaning</text>
+  </svg>`;
+  return wrap;
+}
+
 /** Front view: leaning the phone left/right like a steering wheel. */
 function sideDiagram() {
   const wrap = document.createElement('div');
@@ -1198,11 +1289,12 @@ function sideDiagram() {
     <rect x="111" y="40" width="18" height="60" rx="4" fill="none" stroke="#c297ff" stroke-dasharray="3 3" transform="rotate(-25 120 100)"/>
     <rect x="111" y="40" width="18" height="60" rx="4" fill="none" stroke="#c297ff" stroke-dasharray="3 3" transform="rotate(25 120 100)"/>
     <rect x="111" y="40" width="18" height="60" rx="4" fill="#c297ff"/>
-    <text x="52" y="44" text-anchor="middle" fill="#f0f6fc" font-size="13" font-weight="700">← purer</text>
+    <text x="52" y="44" text-anchor="middle" fill="#f0f6fc" font-size="13" font-weight="700">← richer</text>
     <text x="52" y="60" text-anchor="middle" fill="#9aa7b6" font-size="10">lean left</text>
     <text x="188" y="44" text-anchor="middle" fill="#f0f6fc" font-size="13" font-weight="700">richer →</text>
     <text x="188" y="60" text-anchor="middle" fill="#9aa7b6" font-size="10">lean right</text>
-    <text x="120" y="122" text-anchor="middle" fill="#9aa7b6" font-size="10">±30° around your calibrated neutral</text>
+    <text x="120" y="32" text-anchor="middle" fill="#f0f6fc" font-size="11">upright = pure tone</text>
+    <text x="120" y="122" text-anchor="middle" fill="#9aa7b6" font-size="10">lean either way to add harmonics</text>
   </svg>`;
   return wrap;
 }

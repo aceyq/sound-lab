@@ -89,33 +89,36 @@ Before you start:
 Before your turn:
 1. **[Click the "2. Motion Score" tab.]** Scan the QR code with your phone.
 2. On the phone, tap **Enable Sensors** → **Allow**, then hold still while it calibrates.
+   Start position for calibration: portrait, screen facing you, tilted back slightly (not flat), level. The phone shows ✓ when the position is good.
 3. On the laptop, check it says **Tilt instrument**, **Flow** and **Steady sustain**.
 4. **[Click "▶ Start Audio".]** Leave it disarmed for now.
 
 **[Click "🖥 Presentation Mode".]**
 
-"For my second project my phone is the instrument. Its motion sensors stream to my laptop, which builds the sound out of harmonics, the same additive synthesis as my first project. I wanted pitch and tone color to be separate gestures, so: tilting the phone forward and back changes the pitch, and leaning it sideways, like a steering wheel, changes how many harmonics are in the sound."
+"For my second project my phone is the instrument. Its motion sensors stream to my laptop, which builds the sound out of harmonics, the same additive synthesis as my first project. I wanted pitch and tone color to be separate gestures, so: tilting the phone forward and back changes the pitch, and leaning it sideways, like a steering wheel, changes how many harmonics are in the sound. Held level, it's a pure tone."
 
-**[Tick "Lock fundamental at 200 Hz". Tap "Arm" on the phone.]** *(Lean the phone all the way left.)*
+**[Tick "Lock fundamental at 200 Hz". Tap "Arm" on the phone.]** *(Hold the phone level, in the start position.)*
 
-"I've locked the pitch at 200 hertz. Leaning left, this is a pure sine wave: just the fundamental."
+"I've locked the pitch at 200 hertz. Held level, this is a pure sine wave: just the fundamental."
 
 *(Point at the harmonic panel: only H1 is lit.)*
 
-*(Lean slowly to the right.)*
-"As I lean right, harmonics fade in one at a time: 400, 600, 800 hertz, each a whole-number multiple of 200. The pitch doesn't change, still 200, but the tone gets brighter. That's timbre."
+*(Lean slowly to one side.)*
+"As I lean, harmonics fade in one at a time: 400, 600, 800 hertz, each a whole-number multiple of 200. The pitch doesn't change, still 200, but the tone gets brighter. That's timbre."
 
 *(Point at the spectrogram: new lines appearing above the 200 Hz line.)*
 "Down here is the measured sound. The bottom line stays put, and the new lines stack up above it."
 
-**[Untick "Lock fundamental".]** *(Hold a medium lean, then tilt the top toward you and away.)*
+*(Come back to level.)* "And back to level, it's pure again."
 
-"Now I keep the lean the same and tilt instead. The fundamental moves, and every harmonic moves with it, because they're all multiples of it. Same tone, different pitch."
+*(Lean to a medium amount.)* **[Tick "Lock richness", untick "Lock fundamental".]** *(Tilt the top toward you and away.)*
+
+"Now I've locked the harmonic recipe and I tilt instead. The fundamental moves, and every harmonic moves with it, because they're all multiples of it. Same tone, different pitch."
 
 *(Point at the Movement Score: the blue pitch line moves while the purple richness line stays flat.)*
 "This top graph is just the control data from my phone: blue is pitch, purple is richness. You can see I changed one while holding the other."
 
-**[Click "Accents".]** *(Make two or three sharp flicks at different leans.)* "And in Accents mode each sharp jab plays a short note, using whatever pitch and tone I'm holding."
+**[Untick "Lock richness". Click "Accents".]** *(Make two or three sharp flicks at different leans.)* "And in Accents mode each sharp jab plays a short note, using whatever pitch and tone I'm holding."
 
 **[Tap "Disarm" on the phone, or click "🔇 Mute / Panic".]**
 

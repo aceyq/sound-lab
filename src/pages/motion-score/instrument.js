@@ -9,11 +9,14 @@
 
 import * as M from './mapping.js';
 
-export const DEMO_CAL = Object.freeze({ done: true, neutral: 0, noise: 0.1, jerkNoise: 10, neutralSide: 0, sideAvailable: true, screen: 0, demo: true });
+// Laptop Demo's simulated phone is "held" in the recommended position:
+// portrait, tilted back 25° from upright, level.
+export const DEMO_TILT_BACK = 25;
+export const DEMO_CAL = Object.freeze({ done: true, neutral: 0, noise: 0.1, jerkNoise: 10, up0: M.upFromAngles(DEMO_TILT_BACK, 0), sideAvailable: true, screen: 0, demo: true });
 export const DEFAULT_LOCK_HZ = 200;
 export const LOCK_MIN_HZ = 50;
 export const LOCK_MAX_HZ = 1000;
-const CAL_READY_MS = 1000; // "get ready" before measuring
+const CAL_READY_MS = 2500; // time to get into the start position before measuring
 const CAL_MEASURE_MS = 2000; // measuring stillness
 
 export class Instrument {
@@ -29,6 +32,8 @@ export class Instrument {
     this.exprSource = 'sustain';
     this.exprLevel = 0.6;
     this.lock = { on: false, hz: DEFAULT_LOCK_HZ };
+    // Lock richness: hold the current harmonic recipe (for showing pitch alone).
+    this.richLock = false;
     this.pitchMode = 'continuous'; // continuous | pentatonic
     this.source = 'none'; // none | phone | demo
     this.audioOn = false;
@@ -55,9 +60,10 @@ export class Instrument {
     this.f0 = 220;
     this.note = null;
     this.count = 1;
-    this.sideRel = null;
-    this.richness = 0.5;
-    this.weights = M.richnessWeights(0.5);
+    this.sideRel = null; // sideways lean relative to neutral (degrees)
+    this.hold = null; // live holding-position check
+    this.richness = 0;
+    this.weights = M.richnessWeights(0);
     this.expr = 0;
     this.rotated = false;
     this.detector.reset();
@@ -149,11 +155,16 @@ export class Instrument {
     return this.lock.hz;
   }
 
+  /** Lock richness: keep the current harmonic recipe while lean changes. */
+  setRichLock(on) {
+    this.richLock = !!on;
+  }
+
   /** Is the sideways-lean gesture actually available right now? */
   get sideAvailable() {
     if (this.source === 'demo') return true;
     if (this.source !== 'phone' || !this.cal.done) return false;
-    return !!this.cal.sideAvailable && this.input !== null && Number.isFinite(this.input.side);
+    return !!this.cal.sideAvailable && this.input !== null && Array.isArray(this.input.up);
   }
 
   setMode(mode) {
@@ -175,7 +186,7 @@ export class Instrument {
     const c = this.calib;
     if (c.state !== 'running') return;
     const el = now - c.t0;
-    if (el < CAL_READY_MS) c.text = 'Hold your phone comfortably and stay still… 3';
+    if (el < CAL_READY_MS) c.text = `Get into the start position: portrait, screen facing you, tilted back slightly, level… ${Math.ceil((CAL_READY_MS - el) / 1000)}`;
     else if (el < CAL_READY_MS + CAL_MEASURE_MS) c.text = `Measuring stillness… ${Math.ceil((CAL_READY_MS + CAL_MEASURE_MS - el) / 1000) || 1}`;
     else {
       const r = M.calibrateFromSamples(c.samples);
@@ -186,7 +197,9 @@ export class Instrument {
         this.detector.reset();
         this.calib = {
           state: 'done',
-          text: `Calibration complete. Neutral forward/back tilt${r.sideAvailable ? ' and sideways lean' : ''} set to your current position; stillness noise ${r.noise.toFixed(2)} m/s².${r.sideAvailable ? '' : ' Sideways lean is not available on this phone, so harmonic richness stays at medium (use the Movement intensity mapping instead).'}`,
+          text: r.sideAvailable
+            ? `Calibration complete. This position is now neutral: pitch in the middle, pure tone (fundamental only).${r.hold && r.hold.level === 'warn' ? ` Note: ${r.hold.text}` : ''} Stillness noise ${r.noise.toFixed(2)} m/s².`
+            : `Calibration complete for pitch. Sideways lean is not available on this phone, so the tone stays pure (fundamental only); use the Movement intensity mapping for harmonics. Stillness noise ${r.noise.toFixed(2)} m/s².`,
         };
       }
     }
@@ -208,7 +221,7 @@ export class Instrument {
     this.input = s;
 
     if (this.calib.state === 'running' && receiptMs - this.calib.t0 >= CAL_READY_MS) {
-      this.calib.samples.push({ tilt: s.tilt, side: s.side, lin: s.lin, jerk: s.jerk, screen: s.screen });
+      this.calib.samples.push({ tilt: s.tilt, up: s.up, lin: s.lin, jerk: s.jerk, screen: s.screen });
     }
     // Rotating the phone to a new screen orientation changes what "tilt"
     // means, so the old calibration no longer applies.
@@ -222,14 +235,24 @@ export class Instrument {
     }
 
     const dt = prevT === null ? 0.04 : Math.min(0.3, Math.max(0, (s.t - prevT) / 1000));
-    if (Number.isFinite(s.tilt) && this.cal.done) {
-      const rel = M.relativeTilt(s.tilt, this.cal.neutral, this.settings.invertTilt);
-      this.tiltRel = this.tiltRel === null ? rel : M.smooth(this.tiltRel, rel, dt, 0.08);
+    // While playing, leaning is the gesture, so only flag flat/past-upright/
+    // upside-down positions; before calibration, also flag leaning.
+    this.hold = Array.isArray(s.up) ? M.holdCheck(s.up, { ignoreLean: this.cal.done && this.calib.state !== 'running' }) : null;
+    if (Array.isArray(s.up) && this.cal.done && this.cal.up0) {
+      // Orientation-relative gestures from the phone's own "up" direction.
+      const g = M.relativeGestures(s.up, this.cal.up0);
+      const pitch = this.settings.invertTilt ? -g.pitch : g.pitch;
+      this.tiltRel = this.tiltRel === null ? pitch : M.smooth(this.tiltRel, pitch, dt, 0.08);
+      this.sideRel = this.sideRel === null ? g.lean : M.smooth(this.sideRel, g.lean, dt, 0.1);
+    } else {
+      // No orientation vector (older phone page or gravity-only fallback):
+      // pitch from beta as before, no sideways lean.
+      if (Number.isFinite(s.tilt) && this.cal.done) {
+        const rel = M.relativeTilt(s.tilt, this.cal.neutral, this.settings.invertTilt);
+        this.tiltRel = this.tiltRel === null ? rel : M.smooth(this.tiltRel, rel, dt, 0.08);
+      }
+      this.sideRel = null;
     }
-    if (Number.isFinite(s.side) && this.cal.done && this.cal.sideAvailable) {
-      const rel = s.side - this.cal.neutralSide;
-      this.sideRel = this.sideRel === null ? rel : M.smooth(this.sideRel, rel, dt, 0.1);
-    } else this.sideRel = null; // unavailable: richness holds at medium (see sideAvailable)
     this.intensity = M.intensityToUnit(s.lin, this.cal, this.settings);
     this.recentPeaks.push([s.t, this.intensity]);
     while (this.recentPeaks.length && this.recentPeaks[0][0] < s.t - 150) this.recentPeaks.shift();
@@ -243,8 +266,8 @@ export class Instrument {
           const peak = Math.max(...this.recentPeaks.map((p) => p[1]));
           this.count = M.stableHarmonicCount(M.unitToHarmonicValue(peak), null);
           this.weights = M.countWeights(this.count);
-        } else {
-          this.richness = M.sideToRichness(this.sideRel, this.settings.sideRange);
+        } else if (!this.richLock) {
+          this.richness = M.leanToRichness(this.sideRel, this.settings.deadZone, this.settings.sideRange);
           this.weights = M.richnessWeights(this.richness);
         }
         this.hits++;
@@ -305,8 +328,11 @@ export class Instrument {
           this.weights = M.countWeights(this.count);
         }
       } else {
-        const target = M.sideToRichness(this.sideRel, this.settings.sideRange);
-        this.richness = M.smooth(this.richness, target, dt, 0.08);
+        if (!this.richLock) {
+          const target = M.leanToRichness(this.sideRel, this.settings.deadZone, this.settings.sideRange);
+          this.richness = M.smooth(this.richness, target, dt, 0.08);
+          if (this.richness < 0.002 && target === 0) this.richness = 0; // settle exactly on a pure tone
+        }
         if (this.mode === 'flow') this.weights = M.richnessWeights(this.richness);
       }
     } else if (this.lock.on) this.f0 = this.lock.hz;

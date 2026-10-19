@@ -3,20 +3,23 @@
 // test/motion-mapping.test.js. Nothing here touches the DOM or Web Audio.
 
 import { wrapDeg } from './sensors.js';
+export { wrapDeg };
 
 export const F_MIN = 110; // A2
 export const F_MAX = 880; // A5, three octaves higher
 export const H_MIN = 1;
 export const H_MAX = 12;
 export const TILT_RANGE = 35; // degrees either side of neutral (forward/back → pitch)
-export const SIDE_RANGE = 30; // default degrees either side of neutral (sideways → richness)
+export const SIDE_RANGE = 30; // default degrees of lean (either way) for full richness
+export const DEAD_ZONE = 5; // default degrees of lean around neutral that stay a pure tone
 
 export const DEFAULTS = Object.freeze({
   sensitivity: 1, // 0.5 … 2
   invertTilt: false,
   intensityRange: 5, // m/s² above the noise floor that counts as "full" movement
   jerkThreshold: 120, // m/s³, minimum accent threshold at sensitivity 1
-  sideRange: SIDE_RANGE, // degrees of sideways lean from neutral to minimum/maximum richness
+  sideRange: SIDE_RANGE, // degrees of sideways lean (either direction) that give full richness
+  deadZone: DEAD_ZONE, // degrees of sideways lean around neutral that still give a pure tone
 });
 
 export const ACCENT_COOLDOWN_MS = 300;
@@ -104,13 +107,93 @@ export function harmonicAmplitudes(count, f0, nyquist) {
 }
 
 // ───────────── harmonic richness (Tilt instrument mapping) ─────────────
+// ───────────── orientation (Tilt instrument) ─────────────
+// Both gestures are measured from the direction of "up" (the opposite of
+// gravity) expressed in the PHONE'S OWN axes: x = left→right across the
+// screen, y = bottom→top, z = out of the screen toward you. This does not
+// depend on compass heading or on how the browser splits the orientation into
+// Euler angles, so it stays well-behaved when the phone is held upright, where
+// beta/gamma alone become unreliable.
+//
+//   forward/back tilt = rotation about the phone's left–right (x) axis
+//                       = atan2(up_z, up_y): 0° upright, +90° lying flat.
+//   sideways lean     = how far the left–right axis tips from level
+//                       = asin(up_x): 0° level, right edge down = negative.
+//
+// A rotation about the x axis leaves up_x unchanged, so pure forward/back
+// tilt never changes the lean reading. Turning like a steering wheel changes
+// the lean and only slightly changes the tilt reading.
+
+const R2D = 180 / Math.PI;
+const D2R = Math.PI / 180;
+
+/** "Up" in the phone's own axes from DeviceOrientationEvent beta and gamma. */
+export function upVector(betaDeg, gammaDeg) {
+  const b = betaDeg * D2R;
+  const g = gammaDeg * D2R;
+  return [-Math.sin(g) * Math.cos(b), Math.sin(b), Math.cos(g) * Math.cos(b)];
+}
+
+/** Build an up vector from tilt-back (0 = upright, 90 = flat) and lean. */
+export function upFromAngles(tiltBackDeg, leanDeg) {
+  const t = tiltBackDeg * D2R;
+  const l = leanDeg * D2R;
+  return [Math.sin(l), Math.cos(l) * Math.cos(t), Math.cos(l) * Math.sin(t)];
+}
+
+export function normalize3(v) {
+  const m = Math.hypot(v[0], v[1], v[2]);
+  return m > 1e-9 ? [v[0] / m, v[1] / m, v[2] / m] : null;
+}
+
+/** Tilt-back and lean (degrees) of an up vector. */
+export function orientAngles(up) {
+  return {
+    tiltBack: Math.atan2(up[2], up[1]) * R2D,
+    lean: Math.asin(Math.max(-1, Math.min(1, up[0]))) * R2D,
+  };
+}
+
 /**
- * Sideways lean relative to neutral → richness 0..1. Neutral = 0.5 (medium);
- * leaning left by `range` degrees → 0 (pure sine); right → 1 (all 12).
+ * Gestures relative to the calibrated neutral position.
+ *  pitch: + = top of the phone tilted toward you (higher pitch)
+ *  lean:  + = right edge down
  */
-export function sideToRichness(sideRel, range = SIDE_RANGE) {
-  if (!Number.isFinite(sideRel)) return 0.5;
-  return clamp01(0.5 + sideRel / (2 * range));
+export function relativeGestures(up, up0) {
+  const a = orientAngles(up);
+  const n = orientAngles(up0);
+  return { pitch: -wrapDeg(a.tiltBack - n.tiltBack), lean: -(a.lean - n.lean) };
+}
+
+/**
+ * Is this a good holding position for the Tilt instrument? Recommended:
+ * portrait, screen facing you, top tilted back about 10–50° from upright,
+ * not leaning. Returns { level: 'good' | 'warn' | 'bad', text }.
+ */
+export function holdCheck(up, { ignoreLean = false } = {}) {
+  if (!up) return { level: 'bad', text: 'No orientation data from the phone.' };
+  const { tiltBack, lean } = orientAngles(up);
+  if (up[1] < -0.3) return { level: 'bad', text: 'The phone is upside down. Hold it in portrait with the top up.' };
+  if (tiltBack > 70) return { level: 'bad', text: 'The phone is almost flat. Raise the top so the screen faces you, tilted back only slightly.' };
+  if (tiltBack < -20) return { level: 'bad', text: 'The top is tilted toward you past upright. Tilt the top back a little, away from you.' };
+  if (!ignoreLean && Math.abs(lean) > 25) return { level: 'bad', text: 'The phone is leaning sideways. Hold it level, like a steering wheel pointing straight.' };
+  if (tiltBack > 45) return { level: 'warn', text: 'Quite flat. Raise the top a little toward upright: the flatter the phone, the less a sideways lean registers.' };
+  if (tiltBack < 0) return { level: 'warn', text: 'Slightly past upright. Tilt the top back a little, away from you.' };
+  if (!ignoreLean && Math.abs(lean) > 10) return { level: 'warn', text: 'Leaning a little. Straighten the phone so it is level.' };
+  return { level: 'good', text: 'Good position: portrait, screen facing you, tilted back slightly, level.' };
+}
+
+/**
+ * Sideways lean (relative to neutral) → harmonic richness 0..1.
+ * Neutral = 0 (fundamental only). Inside ±deadZone it stays 0; beyond it,
+ * leaning EITHER way rises smoothly from 0 to 1 at ±range. No jump at the
+ * dead-zone edge: richness starts at exactly 0 there.
+ */
+export function leanToRichness(lean, deadZone = DEAD_ZONE, range = SIDE_RANGE) {
+  if (!Number.isFinite(lean)) return 0;
+  const a = Math.abs(lean);
+  if (a <= deadZone) return 0;
+  return clamp01((a - deadZone) / Math.max(1, range - deadZone));
 }
 
 /** Continuous "harmonic position" 1..12 shown to the user. */
@@ -118,14 +201,15 @@ export const richnessToPosition = (r) => 1 + clamp01(r) * (H_MAX - 1);
 
 /**
  * How much of each harmonic is switched on (0..1), for richness 0..1.
- * The fundamental is always fully on. Harmonic n fades in smoothly while the
- * position 1 + 11·richness moves from n − 1 to n, so higher harmonics enter
- * one after another instead of switching abruptly.
+ * The fundamental is always fully on. With q = 12·richness, harmonic n fades
+ * in while q goes from n − 2 to n (weight (q − n + 2) / 2), so each fade
+ * overlaps the next and higher harmonics enter one after another without any
+ * switching: richness 0 = fundamental only, richness 1 = all 12 at full.
  */
 export function richnessWeights(r) {
-  const pos = richnessToPosition(r);
+  const q = 12 * clamp01(r);
   const w = [];
-  for (let n = 1; n <= H_MAX; n++) w.push(n === 1 ? 1 : clamp01(pos - (n - 1)));
+  for (let n = 1; n <= H_MAX; n++) w.push(n === 1 ? 1 : clamp01((q - n + 2) / 2));
   return w;
 }
 
@@ -231,7 +315,7 @@ export class AccentDetector {
 }
 
 // ───────────── calibration ─────────────
-export const NO_CAL = Object.freeze({ done: false, neutral: 0, noise: 0.15, jerkNoise: 20, neutralSide: 0, sideAvailable: false, screen: 0 });
+export const NO_CAL = Object.freeze({ done: false, neutral: 0, noise: 0.15, jerkNoise: 20, up0: null, sideAvailable: false, screen: 0 });
 
 /** Average of angles (handles wrap-around, e.g. 179° and −179° → 180°). */
 export function circularMeanDeg(angles) {
@@ -264,16 +348,17 @@ export function calibrateFromSamples(samples) {
   if (noise > 2) return { error: 'There was too much movement to measure stillness. Rest your arm and try again.' };
   const jerks = good.map((s) => s.jerk).filter(Number.isFinite);
   const jerkNoise = jerks.length ? percentile(jerks, 90) : NO_CAL.jerkNoise;
-  // Sideways neutral, only if the phone reported sideways lean throughout.
-  const sides = good.map((s) => s.side).filter(Number.isFinite);
-  let neutralSide = 0;
+  // Neutral orientation from the phone's "up" direction, if it was reported.
+  const ups = good.map((s) => s.up).filter((u) => Array.isArray(u));
+  let up0 = null;
   let sideAvailable = false;
-  if (sides.length >= good.length * 0.8) {
-    neutralSide = sides.reduce((a, b) => a + b, 0) / sides.length;
-    if (Math.max(...sides.map((v) => Math.abs(v - neutralSide))) > 15) {
-      return { error: 'The phone leaned sideways too much. Hold it still for the whole countdown and try again.' };
-    }
+  if (ups.length >= good.length * 0.8) {
+    up0 = normalize3([0, 1, 2].map((k) => ups.reduce((a, u) => a + u[k], 0)));
+    const spread = Math.max(...ups.map((u) => Math.acos(Math.max(-1, Math.min(1, u[0] * up0[0] + u[1] * up0[1] + u[2] * up0[2]))) * R2D));
+    if (spread > 15) return { error: 'The phone moved too much. Hold it still for the whole countdown and try again.' };
+    const hold = holdCheck(up0);
+    if (hold.level === 'bad') return { error: `${hold.text} Then calibrate again.`, hold };
     sideAvailable = true;
   }
-  return { done: true, neutral, noise, jerkNoise, neutralSide, sideAvailable, screen: good[good.length - 1].screen ?? 0 };
+  return { done: true, neutral, noise, jerkNoise, up0, sideAvailable, hold: up0 ? holdCheck(up0) : null, screen: good[good.length - 1].screen ?? 0 };
 }

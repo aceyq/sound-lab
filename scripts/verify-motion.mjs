@@ -113,14 +113,20 @@ check('Default mapping is Tilt instrument with Steady sustain', s.mapping === 't
 const sustain = await measure({ beta: 60, gamma: 0, a: 0 });
 check('Steady sustain: a still phone keeps a steady tone', sustain.exprGain > 0.5 && sustain.allowed.ok, `gain ${sustain.exprGain.toFixed(2)}`);
 await lap.locator('.ms-sub input[type="number"]').fill('200');
-await lap.locator('.ms-sub input[type="checkbox"]').check();
+await lap.getByRole('checkbox', { name: /Lock fundamental/ }).check();
 // The lean that gives a given richness depends on beta: lean = asin(sin γ · cos β).
-const pure = await measure({ beta: 50, gamma: -90, a: 0 }, 1800);
+// Neutral (level, as calibrated): pure tone. Tilting forward/back only (gamma 0 = rotation about the phone's own left–right axis) must keep it pure.
+const tiltOnly = [];
+for (const b of [60, 45, 75, 50, 70, 60]) { tiltOnly.push(await measure({ beta: b, gamma: 0, a: 0 }, 500)); }
+check('Forward/back tilt alone keeps the tone pure (no harmonics leak in)', tiltOnly.every((x) => x.richness === 0 && Math.abs(x.sideRel) < 1), tiltOnly.map((x) => `${x.sideRel.toFixed(1)}°→${Math.round(x.richness * 100)}%`).join(' '));
+const pure = await measure({ beta: 50, gamma: 0, a: 0 }, 1800);
 const pureOnly = pure.liveGains.slice(1).every((g) => g < 0.01) && pure.liveGains[0] > 0.9;
-check('Lock 200 Hz + lean left: only the fundamental sounds', pure.f0 === 200 && pureOnly && pure.peaks.length >= 1 && Math.abs(pure.peaks[0].f - 200) < 3 && !pure.peaks.some((p) => p.f > 300 && p.db > pure.peaks[0].db - 40), `peaks ${pure.peaks.slice(0, 3).map((p) => p.f).join(', ')}`);
+check('Lock 200 Hz + phone level (neutral): only the fundamental sounds', pure.f0 === 200 && pureOnly && pure.peaks.length >= 1 && Math.abs(pure.peaks[0].f - 200) < 3 && !pure.peaks.some((p) => p.f > 300 && p.db > pure.peaks[0].db - 40), `peaks ${pure.peaks.slice(0, 3).map((p) => p.f).join(', ')}`);
 // Lean slowly right while sampling the oscillator gains: smooth fades, no jumps, 12 oscillators.
 const gainTrace = [];
-for (let g = -90; g <= 90; g += 6) {
+await sim(phone, { gamma: -90 });
+await wait(lap, 1500);
+for (let g = -90; g <= 90; g += 3) {
   await sim(phone, { gamma: g });
   await wait(lap, 120);
   const x = await snap(lap);
@@ -130,7 +136,9 @@ await wait(lap, 1500);
 const rich = await snap(lap);
 rich.peaks = await lap.evaluate(() => window.__motionScore.measuredPeaks());
 const maxStep = Math.max(...gainTrace.slice(1).map((x, i) => Math.max(...x.liveGains.map((g, k) => Math.abs(g - gainTrace[i].liveGains[k])))));
-check('Leaning right fades harmonics in smoothly (no jumps)', maxStep < 0.25 && gainTrace.every((x) => x.liveOscillators === 12), `largest gain step between samples ${maxStep.toFixed(3)}, oscillators ${gainTrace.at(-1).liveOscillators}`);
+const mid = gainTrace[Math.floor(gainTrace.length / 2)];
+check('Leaning either way adds harmonics; level is pure again', gainTrace[0].richness > 0.95 && gainTrace.at(-1).richness > 0.95 && mid.richness < 0.05, `left ${gainTrace[0].richness.toFixed(2)}, level ${mid.richness.toFixed(2)}, right ${gainTrace.at(-1).richness.toFixed(2)}`);
+check('Leaning fades harmonics in and out smoothly (no jumps)', maxStep < 0.2 && gainTrace.every((x) => x.liveOscillators === 12), `largest gain step between samples ${maxStep.toFixed(3)}, oscillators ${gainTrace.at(-1).liveOscillators}`);
 check('Pitch stays locked at 200 Hz while richness changes', gainTrace.every((x) => x.f0 === 200) && rich.richness > 0.95, `richness ${rich.richness.toFixed(2)}`);
 const ratios = rich.oscFreqs.map((f, i) => f / (i + 1));
 check('Every oscillator runs at n × f0 (f0 = 200 Hz)', ratios.every((r) => Math.abs(r - ratios[0]) < 0.001) && Math.abs(ratios[0] - 200) < 0.1, ratios.slice(0, 4).map((r) => r.toFixed(3)).join(', '));
@@ -147,11 +155,16 @@ await lap.locator('input[aria-label="Expression"]').evaluate((e) => { e.value = 
 await wait(lap, 600);
 p = await phoneSnap(phone);
 check('Laptop Expression slider is reflected on the phone', p.laptop && Math.abs(p.laptop.exprLevel - 0.7) < 0.011, `${p.laptop && p.laptop.exprLevel}`);
-// Unlock: tilt changes pitch, richness unchanged.
-await lap.locator('.ms-sub input[type="checkbox"]').uncheck();
-const unlockUp = await measure({ beta: 80, gamma: 15, a: 0 });
-const unlockDown = await measure({ beta: 40, gamma: 15, a: 0 });
-check('Unlocked: forward/back tilt moves the pitch, richness holds', unlockUp.f0 > 450 && unlockDown.f0 < 220 && Math.abs(unlockUp.richness - unlockDown.richness) < 0.25, `${unlockUp.f0.toFixed(0)} / ${unlockDown.f0.toFixed(0)} Hz, richness ${unlockUp.richness.toFixed(2)} / ${unlockDown.richness.toFixed(2)}`);
+// Lean to a medium richness, Lock richness, unlock the pitch: tilt moves the pitch, recipe held.
+await sim(phone, { beta: 60, gamma: 35 });
+await wait(lap, 1200);
+await lap.getByRole('checkbox', { name: /Lock fundamental/ }).uncheck();
+await lap.getByRole('checkbox', { name: /Lock richness/ }).check();
+const heldW = (await snap(lap)).weights;
+const unlockUp = await measure({ beta: 80, gamma: -20, a: 0 });
+const unlockDown = await measure({ beta: 40, gamma: 0, a: 0 });
+check('Lock richness: recipe held while forward/back tilt moves the pitch', unlockUp.f0 > 450 && unlockDown.f0 < 220 && unlockUp.richLock && JSON.stringify(unlockUp.weights) === JSON.stringify(heldW) && JSON.stringify(unlockDown.weights) === JSON.stringify(heldW), `${unlockUp.f0.toFixed(0)} / ${unlockDown.f0.toFixed(0)} Hz, richness ${unlockUp.richness.toFixed(2)}`);
+await lap.getByRole('checkbox', { name: /Lock richness/ }).uncheck();
 await sim(phone, { gamma: 0 });
 
 // ── Legacy mapping: Movement intensity ──
@@ -339,7 +352,7 @@ check('Auto demo step 1: pure 200 Hz sine', a1.auto === 0 && a1.f0 === 200 && a1
 check('Auto demo is labeled as simulated', await demo.getByText(/AUTO DEMO · simulated input/).isVisible());
 await wait(demo, 8500);
 const a2 = await snap(demo);
-check('Auto demo step 2: 200 Hz held while harmonics fade in', a2.auto === 1 && a2.f0 === 200 && a2.richness > 0.5, `step ${a2.auto}, richness ${a2.richness.toFixed(2)}`);
+check('Auto demo step 2: 200 Hz held while harmonics fade in', a2.auto === 1 && a2.f0 === 200 && a2.richness > 0.3, `step ${a2.auto}, richness ${a2.richness.toFixed(2)}`);
 await wait(demo, 9000);
 const a3 = await snap(demo);
 await wait(demo, 2000);

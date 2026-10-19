@@ -7,7 +7,7 @@ export const HONESTY =
 export const MAPPINGS = {
   tilt: [
     ['Forward/back tilt changes pitch.', 'Top of the phone toward you = higher, away = lower (±35° around your calibrated neutral).', '#58d1ff'],
-    ['Sideways lean changes harmonic richness.', 'Lean left toward a pure sine, right toward a rich, bright tone (±30°). Neutral = medium. Pitch stays where it is.', '#c297ff'],
+    ['Sideways lean changes harmonic richness.', 'Held level (your calibrated neutral) = a pure tone, the fundamental only. Lean either way past a small dead zone (±5°) and harmonics fade in, all 12 by about 30°. Come back to level = pure again.', '#c297ff'],
     ['Sharp movements trigger notes in Accents mode.', 'A quick jab or flick plays one short note.', '#ffb74d'],
   ],
   intensity: [
@@ -18,7 +18,7 @@ export const MAPPINGS = {
 };
 
 export const MAPPING_TEXT = {
-  tilt: 'Tilt instrument: forward/back tilt sets the pitch and sideways lean sets the harmonic richness, independently. You can hold one still while changing the other.',
+  tilt: 'Tilt instrument: forward/back tilt sets the pitch; sideways lean (like a steering wheel) adds harmonics. Level = pure tone; leaning either way makes it richer; back to level = pure again. Use the locks below to change only one of them.',
   intensity: 'Movement intensity (the original mapping): tilt sets the pitch, and moving harder adds harmonics and makes the sound stronger at the same time.',
 };
 
@@ -34,9 +34,9 @@ export const MODE_TEXT = {
 
 // Automatic demo (Laptop Demo, simulated input, real synthesis).
 export const AUTO_DEMO = [
-  { id: 'pure', start: 0, end: 5, text: 'A pure 200 Hz sine: only the fundamental (richness 0%).' },
-  { id: 'fade', start: 5, end: 17, text: 'Pitch held at 200 Hz while higher harmonics fade in one by one (watch the harmonic bars and the spectrogram).' },
-  { id: 'move', start: 17, end: 30, text: 'Harmonic balance held steady while the fundamental moves: every harmonic moves with it.' },
+  { id: 'pure', start: 0, end: 5, text: 'Phone level (neutral) with pitch locked at 200 Hz: a pure sine, only the fundamental.' },
+  { id: 'fade', start: 5, end: 17, text: 'Pitch held at 200 Hz while the phone leans: higher harmonics fade in one by one (watch the harmonic bars and the spectrogram).' },
+  { id: 'move', start: 17, end: 30, text: 'Richness locked (harmonic recipe held) while the fundamental moves: every harmonic moves with it.' },
 ];
 
 export const PITCH_TEXT = 'Continuous allows smooth pitch slides. Pentatonic selects nearby notes from A minor pentatonic: A, C, D, E, G.';
@@ -53,7 +53,7 @@ export const HOW = [
     'A still phone still "feels" gravity (9.8 m/s²). We remove it so that only your movement counts.',
     'Most phones report acceleration with gravity already removed. If a phone only reports acceleration including gravity, the app estimates gravity as the slowly changing part of the signal (a 0.5 s low-pass filter) and subtracts it. That estimate is approximate, and Diagnostics says when it is being used.'],
   ['The mappings',
-    'Tilt instrument: forward/back tilt → fundamental frequency (110–880 Hz); sideways lean → harmonic richness. Movement intensity mapping: movement → harmonic components (1–12) and expression. In both, a sharp change in acceleration → a short note in Accents.',
+    'Tilt instrument: forward/back tilt → fundamental frequency (110–880 Hz); sideways lean either way → harmonic richness (level = pure tone). Movement intensity mapping: movement → harmonic components (1–12) and expression. In both, a sharp change in acceleration → a short note in Accents.',
     'The fundamental is the base frequency used to build the sound. Movement intensity is the size of the gravity-free acceleration, smoothed over about 0.12 s, minus your calibrated stillness noise, scaled so that about 5 m/s² (at Sensitivity 1.0×) is 100%. A "sharp movement" is a jerk (rate of change of acceleration) above a threshold, about 120 m/s³ at 1.0×.'],
   ['Why a logarithmic pitch mapping',
     'We hear pitch by ratios: each octave doubles the frequency. Equal tilt steps give equal musical steps.',
@@ -97,8 +97,8 @@ export const ZOOM_STEPS = [
 ];
 
 export const PERFORMANCE_30S = [
-  ['0–10 s', 'Tilt instrument, Flow, Steady sustain. Tick Lock fundamental (200 Hz). Lean left: a pure sine. Lean slowly right: harmonics fade in; the pitch stays at 200 Hz.'],
-  ['10–20 s', 'Hold a medium lean and untick the lock. Tilt toward/away from you: the pitch moves and every harmonic moves with it.'],
-  ['20–27 s', 'Switch to Accents and Pentatonic. Three sharp hits at different tilts and leans: three notes, different pitch and tone.'],
+  ['0–10 s', 'Tilt instrument, Flow, Steady sustain. Tick Lock fundamental (200 Hz). Hold level: a pure sine. Lean slowly to one side: harmonics fade in; the pitch stays at 200 Hz. Back to level: pure again.'],
+  ['10–20 s', 'Lean to a medium richness, tick Lock richness, untick Lock fundamental. Tilt toward/away from you: the pitch moves and every harmonic moves with it.'],
+  ['20–27 s', 'Untick Lock richness. Switch to Accents and Pentatonic. Three sharp hits at different tilts and leans.'],
   ['27–30 s', 'Press Disarm (or Mute / Panic) to finish.'],
 ];
