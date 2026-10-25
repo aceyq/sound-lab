@@ -35,9 +35,10 @@ Other commands:
 | `npm test` | Unit tests (Node's built-in test runner): Frequency Playground validation, normalization, repeat period and waveform; Motion Score message validation, gravity removal, jerk/accent detection, tilt and intensity mappings, calibration, Nyquist, pentatonic, and the safety rules (Panic latch, stale input, disconnect, rotation). |
 | `node scripts/verify.mjs [url]` | Automated browser checks for Frequency Playground in headless Chromium against a running app. Needs Playwright (`npm i -D playwright`). Saves screenshots to `verification/`. |
 | `node scripts/verify-mic.mjs [url] [insecure-url]` | Microphone section checks in headless Chromium with a **simulated** microphone (a generated 200 Hz tone with harmonics played by Chromium's fake capture device), plus simulated permission, missing-device, busy-device and unplug errors. Pass a non-localhost `http://<LAN-IP>:5173/` as the second argument to also check the insecure-page message. Does not prove a physical microphone works. |
+| `node scripts/verify-vowel.mjs [url]` | Vowel Lab checks (assignment 2) with a **simulated** microphone: recording, WAV export contents, n × f0, independent sliders, exclusive playback, save/unsaved state, synthesized export vs the saved recipe, settings import, duplicate A/B, restore after refresh, cleanup. No listening test. |
 | `node scripts/verify-motion.mjs [url]` | Motion Score end-to-end checks: a laptop page and a simulated phone page pair over the real PeerJS service; synthetic sensor events drive the audio. Covers mappings, accents, malformed messages, extra phones, wrong code, Panic, stale input, hidden phone, disconnect, permission denied, no sensors, Laptop Demo offline, and cleanup. Needs internet and Playwright. Synthetic events do not prove real phone hardware works. |
 
-No backend, accounts, API keys or camera are used. The microphone is used only when you click **Enable Microphone** in Frequency Playground; it is analyzed in the browser and never recorded, uploaded or played back. Motion Score's pairing uses PeerJS's free public signaling server (`0.peerjs.com`); everything else is static files.
+No backend, accounts, API keys or camera are used. The microphone is used only when you click **Enable Microphone** in Frequency Playground; it is analyzed in the browser and never uploaded. It is recorded only when you press **Record vowel** in the Vowel Lab; recordings stay in this browser (IndexedDB) until you delete them, and leave it only when you download a WAV yourself. Motion Score's pairing uses PeerJS's free public signaling server (`0.peerjs.com`); everything else is static files.
 
 ## Deploy to GitHub Pages
 
@@ -91,7 +92,7 @@ Design choices worth knowing:
 
 ## Frequency Playground: microphone input (assignment 1)
 
-The **🎤 Microphone input** section at the top of Frequency Playground shows a live waveform and spectrum of the microphone. It is analysis only: no recording, export, pitch detection or vowel analysis yet (those are later assignments).
+The **🎤 Microphone input** section at the top of Frequency Playground shows a live waveform and spectrum of the microphone. The section itself is analysis only; recording happens in the Vowel Lab (below). There is no automatic pitch detection.
 
 | Part | File | Notes |
 | --- | --- | --- |
@@ -108,9 +109,26 @@ Design choices:
 - **Freeze View** copies the current sample buffer and spectrum; the microphone keeps capturing and the level meter stays live. Changing time window or frequency range while frozen re-draws the frozen data.
 - **Synth vs mic.** Enabling the microphone stops synthesized playback (it does not restart by itself). If you press Play while the mic listens, a warning says the speakers may leak into the microphone.
 - **Applied settings** come from `track.getSettings()`. A feature is reported "off" only when the browser says so; otherwise "not reported" or "ON".
-- **For assignment 2**: a recorder can connect to `mic.source` (e.g. an `AudioWorkletNode` collecting samples) without changing the plots.
+- **Assignment 2** records by connecting `src/pages/frequency/recorder.js` to `mic.source`, without changing these plots.
 
 Manual checks that need a **physical microphone** (not covered by the automated, simulated checks): the browser permission prompt and the recording indicator turning off after Stop; real denial ("Block") and re-allowing in site settings; what your browser reports for echo cancellation / noise suppression / auto gain; level-meter response to your voice; a sustained "ah" showing regularly spaced peaks; unplugging a USB/Bluetooth mic while listening; Safari and Firefox behaviour.
+
+## Frequency Playground: Vowel Lab (assignment 2)
+
+A second mode of Frequency Playground (**Mode → 🗣 Vowel Lab**, or `#/frequency?mode=vowel`; the last mode is remembered). Manual frequencies mode is unchanged. Workflow: record → inspect → set the fundamental → adjust harmonics → compare → save → repeat at another pitch. The app never estimates f0, fits amplitudes, or supplies vowel presets; the starting recipe is neutral 1/n.
+
+| Part | File | Notes |
+| --- | --- | --- |
+| Pure logic | `src/pages/frequency/vowel-model.js` | Harmonic rows (n × f0, Nyquist exclusion), recipe peak and output gain, rendering, FFT + Welch spectrum of stored samples, experiment records, duplicate A/B, settings JSON. Unit-tested (`test/vowel.test.js`). |
+| WAV | `src/pages/frequency/wav.js` | Export: 16-bit PCM mono. Import: PCM 8/16/24/32 and float WAV. |
+| Recorder | `src/pages/frequency/recorder.js` | AudioWorklet (ScriptProcessor fallback) on the microphone's own context; raw Float32 samples, no compression. Reaches the destination only through a gain of exactly 0 (some browsers only run nodes that lead to the output). Released after every take. |
+| Playback | `src/pages/frequency/vowel-audio.js` | Own AudioContext. Reference tone, original playback, and an oscillator bank (one sine per harmonic, phase 0, smoothed gain/frequency changes). Only one sound at a time. |
+| Storage | `src/pages/frequency/vowel-store.js` | Experiments in localStorage, recordings in IndexedDB. Both are local to this browser and can be cleared by it; download files to keep them. |
+| Plots / UI | `vowel-plots.js`, `vowel-lab.js` | Overview with draggable analysis segment, zoomed waveform with A/B time cursors and 1/f0 marks, spectra with n × f0 marks and a pinned cursor, harmonic sliders (linear or dB), comparison, notes, downloads, duplicate A/B. |
+
+Design choices: up to **48 harmonics** (default 32): at f0 ≈ 100 Hz that reaches 4.8 kHz, covering the main vowel resonances, while the slider list stays usable. Synthesized sound is peak-normalized to 0.5 (−6 dBFS) for playback and export alike; "Match peak levels" scales the original's peak to the same value. Spectra use the same FFT size, Hann window and 50 % overlap averaging for both curves and are each shown relative to their own strongest peak. Downloads use the last **saved** version of an experiment.
+
+Manual checks that need real hardware and ears: recording your own voice; whether the reference tone is comfortable on your speakers; whether the synthesized vowel is recognizable; Safari/Firefox recording (the automated checks use Chromium only).
 
 ## Frequency Playground known limitations
 

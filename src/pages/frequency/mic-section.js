@@ -441,6 +441,10 @@ export function createMicSection({ vizCard, help, isSynthPlaying, stopSynth, log
   return {
     element,
     frame,
+    // Used by the Vowel Lab to record from this same microphone.
+    mic,
+    enable,
+    stop: stopMic,
     unmount() {
       window.removeEventListener('pagehide', onPageHide);
       el.specCanvas.removeEventListener('pointermove', onMove);

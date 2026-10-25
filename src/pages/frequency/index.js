@@ -6,6 +6,7 @@ import { SpectrumView, findPeaks, isSilent } from './spectrum.js';
 import { SpectrogramView, HISTORY_SEC } from './spectrogram.js';
 import { PRESETS, RANDOM_NOTE, EXPERIMENTS, GLOSSARY } from './content.js';
 import { createMicSection } from './mic-section.js';
+import { createVowelLab } from './vowel-lab.js';
 
 const DEFAULTS = {
   master: 0.18,
@@ -21,8 +22,9 @@ const WINDOW_PRESETS = [
 const VSCALES = [['auto', 'Auto-fit'], [1, '±1'], [0.5, '±0.5'], [0.25, '±0.25'], [0.1, '±0.1'], [0.05, '±0.05']];
 const FFT_SIZES = [2048, 4096, 8192, 16384, 32768];
 const OVERLAY_MAX_SEC = 0.1;
+const MODE_KEY = 'frequencyPlayground.mode';
 
-export function mount(root) {
+export function mount(root, params = new URLSearchParams()) {
   const disposers = [];
   const listen = (target, ev, fn, opts) => {
     target.addEventListener(ev, fn, opts);
@@ -271,41 +273,77 @@ export function mount(root) {
 
   // Header / page toolbar.
   el.presBtn = h('button', { class: 'btn', 'aria-pressed': 'false', onclick: () => setPresentation(!st.presentation) }, 'Presentation Mode: off');
-  el.resetBtn = h('button', { class: 'btn danger', onclick: () => reset() }, 'Reset');
+  el.resetBtn = h('button', { class: 'btn danger manual-only', onclick: () => reset() }, 'Reset');
+  el.lead = h('p', { class: 'lead' }, 'Type frequencies and amplitudes, hear the combined sound, and see it as a waveform, a spectrum and a spectrogram.');
   const top = h('section', { class: 'page-top' },
     h('div', {},
       h('h1', {}, 'Frequency Playground'),
-      h('p', { class: 'lead' }, 'Type frequencies and amplitudes, hear the combined sound, and see it as a waveform, a spectrum and a spectrogram.'),
+      el.lead,
     ),
     h('div', { class: 'top-actions' },
       el.presBtn,
       help('Presentation Mode enlarges text and hides secondary settings (custom zoom, exact spectrum range, slider toggle). Every essential control stays.'),
       el.resetBtn,
-      help('Reset stops the sound and restores: one component (220 Hz, amplitude 1), 18% volume, 20 ms view, auto scales, FFT 8192, and clears the spectrogram and change log.'),
+      el.resetHelp = help('Reset stops the sound and restores: one component (220 Hz, amplitude 1), 18% volume, 20 ms view, auto scales, FFT 8192, and clears the spectrogram and change log.'),
     ),
   );
 
   // Microphone input: its own capture, controls and plots (analysis only).
+  // Before the microphone opens, every sound on this page is stopped.
+  let vowelLab = null;
   const micSection = createMicSection({
     vizCard, help,
-    isSynthPlaying: () => engine.isPlaying,
-    stopSynth: () => stop(),
+    isSynthPlaying: () => engine.isPlaying || !!(vowelLab && vowelLab.playing),
+    stopSynth: () => { stop(); if (vowelLab) vowelLab.stopAudio(); },
     logChange: (text) => logChange(text),
   });
 
+  // Vowel Lab (assignment 2): records from the same microphone, has its own
+  // harmonic synthesizer, and never changes the component table above.
+  vowelLab = createVowelLab({
+    help, micSection,
+    stopOtherAudio: () => stop(),
+    logChange: (text, key) => logChange(text, key),
+  });
+
+  // Two modes: the original arbitrary-frequency table, and the Vowel Lab.
+  el.modeManual = h('button', { class: 'btn seg', onclick: () => setMode('manual') }, '🎛 Manual frequencies');
+  el.modeVowel = h('button', { class: 'btn seg', onclick: () => setMode('vowel') }, '🗣 Vowel Lab: harmonic sliders');
+  const modeBar = h('nav', { class: 'mode-bar', 'aria-label': 'Frequency Playground mode' },
+    h('span', { class: 'ctl-label' }, 'Mode'),
+    h('div', { class: 'seg-group', role: 'group' }, el.modeManual, el.modeVowel),
+    h('span', { class: 'help inline' }, 'Manual: type any frequencies. Vowel Lab: record a vowel and rebuild it from harmonics n × f0.'));
+
   el.backdrop = h('div', { class: 'backdrop', onclick: () => collapseAll() });
-  const page = h('div', { class: 'fp' },
-    top,
-    micSection.element,
-    h('div', { class: 'fp-grid' },
-      h('div', { class: 'fp-controls' }, transportCard, compCard, presetCard, logCard),
-      h('div', { class: 'fp-visuals' }, waveCard, specCard, sgCard),
-    ),
-    expSection,
-    glossary,
-    el.backdrop,
+  const fpGrid = h('div', { class: 'fp-grid' },
+    h('div', { class: 'fp-controls' }, transportCard, compCard, presetCard, logCard),
+    h('div', { class: 'fp-visuals' }, waveCard, specCard, sgCard),
   );
+  const page = h('div', { class: 'fp' });
   root.append(page);
+  let mode = null;
+
+  function setMode(m, { quiet = false } = {}) {
+    if (m === mode) return;
+    const first = mode === null;
+    mode = m;
+    if (!first) { stop(true); vowelLab.stopAudio(); collapseAll(); }
+    const vowel = m === 'vowel';
+    // Same element objects, re-ordered: nothing is rebuilt, so all state is kept.
+    page.replaceChildren(...(vowel
+      ? [top, modeBar, vowelLab.element, micSection.element, logCard, glossary, el.backdrop]
+      : [top, modeBar, micSection.element, fpGrid, expSection, glossary, el.backdrop]));
+    if (!vowel) fpGrid.querySelector('.fp-controls').append(logCard);
+    page.classList.toggle('mode-vowel', vowel);
+    el.resetHelp.classList.add('manual-only');
+    el.modeManual.setAttribute('aria-pressed', String(!vowel));
+    el.modeVowel.setAttribute('aria-pressed', String(vowel));
+    el.lead.textContent = vowel
+      ? 'Record a sustained vowel, then rebuild it yourself from harmonics: set the fundamental, shape the amplitudes, compare and save.'
+      : 'Type frequencies and amplitudes, hear the combined sound, and see it as a waveform, a spectrum and a spectrogram.';
+    try { localStorage.setItem(MODE_KEY, m); } catch { /* storage blocked: the mode just is not remembered */ }
+    if (!quiet && !first) logChange(vowel ? 'Switched to Vowel Lab (sound stopped).' : 'Switched to Manual frequencies (sound stopped).');
+  }
 
   function vizCard(title, key, badge, children) {
     const btn = h('button', { class: 'btn small expand', 'aria-expanded': 'false' }, '⤢ Expand');
@@ -522,6 +560,7 @@ export function mount(root) {
   // ───────────────────────────── playback ─────────────────────────────
   async function play() {
     if (engine.isPlaying) return;
+    vowelLab.stopAudio(); // one sound at a time
     const { factor } = S.normalization(st.comps);
     spectrogram.markStart();
     st.measure.mode = 'warming';
@@ -766,7 +805,7 @@ export function mount(root) {
   listen(window, 'keydown', (e) => {
     if (e.key === 'Escape') collapseAll();
     const tag = (e.target.tagName || '').toLowerCase();
-    if (e.code === 'Space' && !['input', 'select', 'textarea', 'button', 'summary'].includes(tag)) {
+    if (mode === 'manual' && e.code === 'Space' && !['input', 'select', 'textarea', 'button', 'summary'].includes(tag)) {
       e.preventDefault();
       if (engine.isPlaying) stop(); else play();
     }
@@ -820,6 +859,7 @@ export function mount(root) {
     }
     if (spectrogram.dirty) spectrogram.render({ min: st.spec.min, max: st.spec.max, log: st.spec.log });
     micSection.frame();
+    if (mode === 'vowel') vowelLab.frame();
   }
 
   function drawWave() {
@@ -878,6 +918,10 @@ export function mount(root) {
   updateDerived();
   updateTransport();
   logChange('Ready: one component at 220 Hz, amplitude 1. Press Play to listen.');
+  let savedMode = null;
+  try { savedMode = localStorage.getItem(MODE_KEY); } catch { /* storage blocked */ }
+  const wanted = params.get('mode') || savedMode;
+  setMode(wanted === 'vowel' ? 'vowel' : 'manual', { quiet: true });
   raf = requestAnimationFrame(frame);
 
   // Debug hook used by the automated browser checks (scripts/verify.mjs).
@@ -890,8 +934,12 @@ export function mount(root) {
       spectrogramColumns: spectrogram.cols.length,
       loops: window.__fpLoops,
       mic: micSection.debug(),
+      mode,
+      vowel: vowelLab.debug(),
     }),
     micSamples: () => micSection.displayedSamples(),
+    vowelHooks: vowelLab.testHooks,
+    setMode: (m) => setMode(m),
   };
 
   return {
@@ -899,6 +947,7 @@ export function mount(root) {
       alive = false;
       cancelAnimationFrame(raf);
       window.__fpLoops -= 1;
+      window.__frequencyPlaygroundLastVowel = vowelLab.unmount();
       window.__frequencyPlaygroundLastMic = micSection.unmount();
       engine.close();
       for (const d of disposers) d();
