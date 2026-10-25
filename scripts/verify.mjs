@@ -51,7 +51,7 @@ check('Spectrum shows "press Play" state before playback', d.measure.mode === 'i
 check('Audio context reports a sample rate', d.engine.sampleRate > 0, `${d.engine.sampleRate} Hz`);
 await page.screenshot({ path: shots + '01-before-play.png' });
 
-await page.getByRole('button', { name: '▶ Play' }).click();
+await page.getByRole('button', { name: '▶ Play', exact: true }).click();
 await wait(900);
 d = await dbg();
 const tol = () => Math.max(1.5 * d.measure.binHz, 2);
@@ -161,23 +161,23 @@ d = await dbg();
 check('Harmonic Builder replaces with 110, 220, 330, 440', d.comps.map((c) => c.freq).join() === '110,220,330,440');
 
 // Stop → frozen; repeated play/stop does not leak oscillators.
-await page.getByRole('button', { name: '■ Stop' }).click();
+await page.getByRole('button', { name: '■ Stop', exact: true }).click();
 await wait(300);
 d = await dbg();
 check('Stop: status stopped, spectrum labelled frozen', !d.engine.playing && d.measure.mode === 'frozen');
 const stateText = await page.locator('.viz[data-viz=spec] .state-line').textContent();
 check('Frozen measurement labelled honestly', /Frozen/.test(stateText), stateText);
 for (let i = 0; i < 5; i++) {
-  await page.getByRole('button', { name: '▶ Play' }).click();
+  await page.getByRole('button', { name: '▶ Play', exact: true }).click();
   await wait(250);
-  await page.getByRole('button', { name: '■ Stop' }).click();
+  await page.getByRole('button', { name: '■ Stop', exact: true }).click();
   await wait(150);
 }
-await page.getByRole('button', { name: '▶ Play' }).dblclick();
+await page.getByRole('button', { name: '▶ Play', exact: true }).dblclick();
 await wait(400);
 d = await dbg();
 check('Double-click Play still runs one set of oscillators', d.engine.voices.length === 4);
-await page.getByRole('button', { name: '■ Stop' }).click();
+await page.getByRole('button', { name: '■ Stop', exact: true }).click();
 await wait(500);
 d = await dbg();
 check('After repeated Play/Stop all oscillators are released', d.engine.liveOscillators === 0, `live=${d.engine.liveOscillators}, created=${d.engine.createdOscillators}`);
@@ -189,7 +189,7 @@ check('Spectrum can be expanded on its own', await page.locator('.viz.expanded')
 await page.keyboard.press('Escape');
 await page.getByRole('button', { name: /Presentation Mode/ }).click();
 check('Presentation Mode hides secondary settings', !(await page.locator('label.custom').isVisible()));
-await page.getByRole('button', { name: '▶ Play' }).click();
+await page.getByRole('button', { name: '▶ Play', exact: true }).click();
 await wait(1500);
 await page.screenshot({ path: shots + '05-presentation-playing.png', fullPage: true });
 

@@ -5,6 +5,7 @@ import { WaveformView } from './waveform.js';
 import { SpectrumView, findPeaks, isSilent } from './spectrum.js';
 import { SpectrogramView, HISTORY_SEC } from './spectrogram.js';
 import { PRESETS, RANDOM_NOTE, EXPERIMENTS, GLOSSARY } from './content.js';
+import { createMicSection } from './mic-section.js';
 
 const DEFAULTS = {
   master: 0.18,
@@ -173,7 +174,7 @@ export function mount(root) {
   el.waveNote = h('p', { class: 'note', 'aria-live': 'polite' });
   el.waveReadout = h('span', { class: 'muted mono' });
   const waveCard = vizCard('Waveform — signal over time', 'wave',
-    'Calculated from the table with the same formula as the audio · after normalization, before Master Volume',
+    'Source: synthesizer · calculated from the table with the same formula as the audio · after normalization, before Master Volume',
     [
       h('div', { class: 'row gap wrap controls' },
         h('span', { class: 'ctl-label' }, 'Time window'),
@@ -206,7 +207,7 @@ export function mount(root) {
   el.specState = h('p', { class: 'state-line', 'aria-live': 'polite' });
   el.peakList = h('p', { class: 'peaks mono', 'aria-live': 'off' });
   const specCard = vizCard('Frequency Spectrum — frequencies present now', 'spec',
-    'Measured live with an FFT (AnalyserNode) · after normalization, before Master Volume',
+    'Source: synthesizer · measured live with an FFT (AnalyserNode) · after normalization, before Master Volume',
     [
       h('div', { class: 'row gap wrap controls' },
         h('span', { class: 'secondary row gap' },
@@ -233,7 +234,7 @@ export function mount(root) {
   el.sgState = h('p', { class: 'state-line', 'aria-live': 'polite' });
   el.sgRange = h('span', { class: 'muted' });
   const sgCard = vizCard('Spectrogram — how frequencies change over time', 'sg',
-    `Successive FFT snapshots from the same measurement as the spectrum · last ${HISTORY_SEC} s of playing time`,
+    `Source: synthesizer · successive FFT snapshots from the same measurement as the spectrum · last ${HISTORY_SEC} s of playing time`,
     [
       h('div', { class: 'row gap wrap controls' },
         h('button', { class: 'btn small', onclick: () => { spectrogram.clear(); logChange('Spectrogram history cleared (display only).'); } }, 'Clear History'),
@@ -284,9 +285,18 @@ export function mount(root) {
     ),
   );
 
+  // Microphone input: its own capture, controls and plots (analysis only).
+  const micSection = createMicSection({
+    vizCard, help,
+    isSynthPlaying: () => engine.isPlaying,
+    stopSynth: () => stop(),
+    logChange: (text) => logChange(text),
+  });
+
   el.backdrop = h('div', { class: 'backdrop', onclick: () => collapseAll() });
   const page = h('div', { class: 'fp' },
     top,
+    micSection.element,
     h('div', { class: 'fp-grid' },
       h('div', { class: 'fp-controls' }, transportCard, compCard, presetCard, logCard),
       h('div', { class: 'fp-visuals' }, waveCard, specCard, sgCard),
@@ -809,6 +819,7 @@ export function mount(root) {
       updateSpecText();
     }
     if (spectrogram.dirty) spectrogram.render({ min: st.spec.min, max: st.spec.max, log: st.spec.log });
+    micSection.frame();
   }
 
   function drawWave() {
@@ -878,7 +889,9 @@ export function mount(root) {
       measure: { mode: st.measure.mode, silent: st.measure.silent, peaks: st.measure.peaks.map((p) => +p.freq.toFixed(2)), binHz: st.measure.binHz },
       spectrogramColumns: spectrogram.cols.length,
       loops: window.__fpLoops,
+      mic: micSection.debug(),
     }),
+    micSamples: () => micSection.displayedSamples(),
   };
 
   return {
@@ -886,6 +899,7 @@ export function mount(root) {
       alive = false;
       cancelAnimationFrame(raf);
       window.__fpLoops -= 1;
+      window.__frequencyPlaygroundLastMic = micSection.unmount();
       engine.close();
       for (const d of disposers) d();
       waveform.dispose();

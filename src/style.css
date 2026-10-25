@@ -481,3 +481,50 @@ body.controller-page #app { padding: 12px 14px 40px; max-width: 560px; }
 .pc-hold.good { color: var(--ok); }
 .pc-hold.warn { color: var(--warn); }
 .pc-hold.bad { color: #ff8c84; }
+
+/* ───── Frequency Playground: microphone input ───── */
+.mic-panel { border-color: #5a4320; }
+.mic-panel.listening { border-color: #ffb74d; box-shadow: 0 0 0 1px rgba(255,183,77,0.25); }
+.mic-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.mic-head h2 { margin: 0; }
+.mic-controls { margin: 4px 0 6px; }
+.btn.mic-enable { background: #a8620e; border-color: #ffb74d; }
+.btn.mic-enable:hover:not(:disabled) { background: #bd7114; border-color: #ffd08a; }
+.mic-status { padding: 4px 12px; border-radius: 999px; font-weight: 700; border: 1px solid var(--border); white-space: nowrap; }
+.mic-status.off { color: var(--muted); }
+.mic-status.busy { color: #1a1300; background: var(--warn); border-color: var(--warn); }
+.mic-status.on { color: #1a0f00; background: #ffb74d; border-color: #ffb74d; }
+.mic-status.bad { color: #fff; background: #a3302a; border-color: #d1453d; }
+.mic-level { display: inline-flex; align-items: center; gap: 8px; }
+.mic-meter { position: relative; display: inline-block; width: 150px; height: 12px; border-radius: 6px; background: #0b0f14; border: 1px solid var(--border); overflow: hidden; }
+.mic-meter-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: linear-gradient(90deg, #3fb950 0%, #3fb950 70%, #e3b341 85%, #ff7b72 100%); background-size: 150px 100%; }
+.mic-meter-peak { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff; opacity: 0; }
+.mic-meter-text { min-width: 6.5em; color: var(--muted); }
+.mic-clip { color: var(--bad); font-weight: 600; font-size: 0.9em; }
+.mic-clip:empty { display: none; }
+.btn.mic-freeze[aria-pressed="true"] { background: #2a3a4f; border-color: #9ec5ff; color: #e3efff; font-weight: 700; }
+.mic-freeze-state { display: none; padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.9em; color: #d9e8ff; background: #1b2b40; border: 1px dashed #9ec5ff; }
+.mic-freeze-state.show { display: inline-block; }
+.mic-error:empty { display: none; }
+.mic-error { color: #ffd6d2; background: #3a1512; border: 1px solid #a3302a; border-radius: 6px; padding: 8px 10px; margin: 6px 0; font-size: 0.93em; }
+.mic-warn:empty { display: none; }
+.mic-warn { color: #1a1300; background: var(--warn); border-radius: 6px; padding: 6px 10px; font-size: 0.9em; font-weight: 600; }
+.mic-settings p { margin: 2px 0; font-size: 0.88em; }
+.mic-settings details { font-size: 0.88em; }
+.mic-settings summary { cursor: pointer; color: var(--muted); }
+.mic-settings ul { margin: 4px 0; padding-left: 20px; }
+.mic-settings li.ok { color: var(--ok); }
+.mic-settings li.warn { color: var(--warn); }
+.mic-explain { margin: 6px 0; background: var(--card-2); border-radius: 6px; padding: 6px 10px; font-size: 0.93em; }
+.mic-explain summary { cursor: pointer; font-weight: 600; }
+.mic-explain ul { margin: 6px 0; padding-left: 20px; }
+.mic-plots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 10px; }
+.mic-plots[hidden] { display: none; }
+@media (max-width: 1100px) { .mic-plots { grid-template-columns: 1fr; } }
+.mic-plots .viz { margin-bottom: 0; background: var(--card-2); }
+.mic-plots .badge { color: #ffe2b8; background: #3a2708; border-color: #7a5212; }
+.mic-wave-box { height: 280px; }
+.mic-spec-box { height: 280px; }
+.presentation .mic-wave-box, .presentation .mic-spec-box { height: 320px; }
+.mic-scale, .mic-hover { color: var(--muted); font-size: 0.9em; }
+.mic-panel.frozen .state-line.frozen { font-weight: 600; }

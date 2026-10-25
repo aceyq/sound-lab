@@ -34,9 +34,10 @@ Other commands:
 | `npm run preview` | Serves the production build at http://localhost:4173/ |
 | `npm test` | Unit tests (Node's built-in test runner): Frequency Playground validation, normalization, repeat period and waveform; Motion Score message validation, gravity removal, jerk/accent detection, tilt and intensity mappings, calibration, Nyquist, pentatonic, and the safety rules (Panic latch, stale input, disconnect, rotation). |
 | `node scripts/verify.mjs [url]` | Automated browser checks for Frequency Playground in headless Chromium against a running app. Needs Playwright (`npm i -D playwright`). Saves screenshots to `verification/`. |
+| `node scripts/verify-mic.mjs [url] [insecure-url]` | Microphone section checks in headless Chromium with a **simulated** microphone (a generated 200 Hz tone with harmonics played by Chromium's fake capture device), plus simulated permission, missing-device, busy-device and unplug errors. Pass a non-localhost `http://<LAN-IP>:5173/` as the second argument to also check the insecure-page message. Does not prove a physical microphone works. |
 | `node scripts/verify-motion.mjs [url]` | Motion Score end-to-end checks: a laptop page and a simulated phone page pair over the real PeerJS service; synthetic sensor events drive the audio. Covers mappings, accents, malformed messages, extra phones, wrong code, Panic, stale input, hidden phone, disconnect, permission denied, no sensors, Laptop Demo offline, and cleanup. Needs internet and Playwright. Synthetic events do not prove real phone hardware works. |
 
-No backend, accounts, API keys, camera or microphone are used. Motion Score's pairing uses PeerJS's free public signaling server (`0.peerjs.com`); everything else is static files.
+No backend, accounts, API keys or camera are used. The microphone is used only when you click **Enable Microphone** in Frequency Playground; it is analyzed in the browser and never recorded, uploaded or played back. Motion Score's pairing uses PeerJS's free public signaling server (`0.peerjs.com`); everything else is static files.
 
 ## Deploy to GitHub Pages
 
@@ -87,6 +88,29 @@ Design choices worth knowing:
 - **Normalization.** The factor is 1 ÷ (sum of active amplitudes) when that sum is above 1, and 1 otherwise. The peak of the mixture can never exceed that sum, so this rules out clipping. Every component gets the same factor, so their ratios stay the same.
 - **Phase.** All oscillators start at the same audio-clock instant t₀ with phase 0, which matches the formula the waveform plot uses. A component that is added, or whose frequency changes during playback, gets a new oscillator. That oscillator starts a whole number of its own periods after t₀, so its phase still lines up with the formula. The old one crossfades out over about 20 ms.
 - **Smoothness.** Gain and volume changes ramp smoothly (15–20 ms time constant), and Play and Stop fade over 30 ms. The engine refuses to start twice. Stopped oscillators disconnect themselves when they end.
+
+## Frequency Playground: microphone input (assignment 1)
+
+The **🎤 Microphone input** section at the top of Frequency Playground shows a live waveform and spectrum of the microphone. It is analysis only: no recording, export, pitch detection or vowel analysis yet (those are later assignments).
+
+| Part | File | Notes |
+| --- | --- | --- |
+| Capture | `src/pages/frequency/mic.js` | `MicInput`: `getUserMedia` on the Enable click, with `echoCancellation`, `noiseSuppression` and `autoGainControl` requested **off** (plain values, so a browser that cannot comply still opens the mic). Its **own** `AudioContext`, separate from the synthesizer's: `MediaStreamSource → waveAnalyser` (fftSize 32768, time-domain samples) and `→ specAnalyser` (selectable FFT, smoothing 0.5). Nothing connects to `destination`, so the mic is never heard. `stop()` stops every media track (releases the device), disconnects the 3 nodes and closes the context. A Stop during the permission prompt releases the stream as soon as it arrives. Track `ended` (unplugged) becomes an error. |
+| Pure helpers | `src/pages/frequency/mic-analysis.js` | Window length in samples, trigger ("Steady display"), RMS/peak in dBFS, auto-fit scale, bin spacing, applied-settings report, error messages. Work on plain `Float32Array`s, so a later stage can run them on recorded samples. |
+| Plots | `src/pages/frequency/mic-plots.js` | Orange traces = microphone. The waveform draws exactly `round(window × sampleRate)` consecutive samples across the plot width (min/max per pixel column when there are more samples than pixels). The spectrum takes the max of the bins in each pixel column, so a narrow peak is never skipped. |
+| UI | `src/pages/frequency/mic-section.js` | Controls, status, level meter, Freeze View, explanations. Drawing happens in the page's existing animation loop (no extra loop). |
+
+Design choices:
+
+- **Time windows** 10/20/50/100/200 ms. The label is the number of samples actually drawn ÷ the context's sample rate (shown under the plot). *Steady display* only chooses the starting sample (an upward zero crossing within the previous 25 ms), like an oscilloscope trigger.
+- **Vertical scale** is relative digital amplitude (±1 = digital full scale), not sound pressure. Auto-fit grows immediately and shrinks after 1.5 s; the current scale is always printed.
+- **Spectrum** default 0–5000 Hz, FFT 4096 (≈ 85–93 ms window, ≈ 10.8–11.7 Hz bin spacing at 44.1/48 kHz), level in dB relative to digital full scale. Bin spacing is always `ctx.sampleRate ÷ fftSize` from the microphone's own context. Peaks are labelled neutrally ("frequency peak"), never "fundamental" or "harmonic".
+- **Freeze View** copies the current sample buffer and spectrum; the microphone keeps capturing and the level meter stays live. Changing time window or frequency range while frozen re-draws the frozen data.
+- **Synth vs mic.** Enabling the microphone stops synthesized playback (it does not restart by itself). If you press Play while the mic listens, a warning says the speakers may leak into the microphone.
+- **Applied settings** come from `track.getSettings()`. A feature is reported "off" only when the browser says so; otherwise "not reported" or "ON".
+- **For assignment 2**: a recorder can connect to `mic.source` (e.g. an `AudioWorkletNode` collecting samples) without changing the plots.
+
+Manual checks that need a **physical microphone** (not covered by the automated, simulated checks): the browser permission prompt and the recording indicator turning off after Stop; real denial ("Block") and re-allowing in site settings; what your browser reports for echo cancellation / noise suppression / auto gain; level-meter response to your voice; a sustained "ah" showing regularly spaced peaks; unplugging a USB/Bluetooth mic while listening; Safari and Firefox behaviour.
 
 ## Frequency Playground known limitations
 
