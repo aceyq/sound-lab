@@ -15,7 +15,7 @@ import { VowelRecorder, recorderCounters } from './recorder.js';
 import { VowelAudio } from './vowel-audio.js';
 import { OverviewView, ZoomWaveView, CompareSpectrumView } from './vowel-plots.js';
 import * as store from './vowel-store.js';
-import { createVowelTutorial, TUTORIAL_STEPS } from './vowel-tutorial.js';
+import { createVowelTutorial } from './vowel-tutorial.js';
 
 const DURATIONS = [2, 3, 4];
 const REF_SUGGESTIONS = [[110, 'A2 · low voice'], [147, 'D3'], [196, 'G3'], [220, 'A3'], [262, 'C4 · middle C'], [330, 'E4'], [392, 'G4']];
@@ -24,7 +24,6 @@ const RANGES = [1000, 2000, 4000, 5000, 8000];
 const FFT_SIZES = [4096, 8192, 16384];
 const COUNTS = [8, 12, 16, 24, 32, 40, 48];
 const MIN_TAKE_SEC = 0.3;
-const TUTORIAL_AUTO_STEP = TUTORIAL_STEPS.findIndex((s) => s.id === 'auto');
 
 /**
  * opts: { help, micSection, stopOtherAudio(), logChange(text) }
@@ -86,7 +85,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
   // ───────────── shared building blocks ─────────────
   const el = {};
   // Click-through tutorial popup. It only explains; it changes nothing.
-  const tutorial = createVowelTutorial();
+  const tutorial = createVowelTutorial({ el, hasRecording: () => !!workRec() });
   const stage = (num, title, sub, ...children) => h('section', { class: 'card vl-stage', 'data-stage': num, 'aria-label': `Stage ${num}: ${title}` },
     h('div', { class: 'vl-stage-head' }, h('span', { class: 'vl-num' }, String(num)), h('div', {}, h('h2', {}, title), h('p', { class: 'muted vl-sub' }, sub))),
     ...children);
@@ -313,7 +312,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
     h('div', { class: 'vl-stage-head' }, h('span', { class: 'vl-num' }, '⚙'), h('div', {},
       h('h2', {}, 'Automatic vowel synthesis'),
       h('p', { class: 'muted vl-sub' }, 'Assignment 3: let the app measure the fundamental and harmonics, then compare.')),
-      h('button', { class: 'btn small vt-section-help', type: 'button', onclick: () => tutorial.open(TUTORIAL_AUTO_STEP) }, '❓ Explain this section')),
+      h('button', { class: 'btn small vt-section-help', type: 'button', onclick: () => tutorial.start('auto') }, '❓ Explain this section')),
     h('p', { class: 'vl-auto-lead' }, 'The app estimates the base frequency and the strengths of its harmonics from a steady part of your recording, then combines new sine waves to recreate that sound.'),
     help('It uses the recording and analysis segment chosen in stages 1–2 (the shaded part of the overview). It does not change your sliders or any saved experiment. “Save automatic result” stores it as a separate, new experiment.'),
     h('div', { class: 'row gap wrap' }, el.autoAnalyze, el.autoSource),
@@ -471,7 +470,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
       h('div', { class: 'vl-intro-head' },
         h('h2', {}, '🗣 Vowel Lab: recreate a sung vowel with harmonic sliders'),
         tutorial.button),
-      h('p', { class: 'muted' }, 'Record → inspect → set the fundamental → adjust harmonics → compare → save → repeat at another pitch. New here? Press “How to use Vowel Lab” for a 10-step walkthrough; it changes nothing.'),
+      h('p', { class: 'muted' }, 'Record → inspect → set the fundamental → adjust harmonics → compare → save → repeat at another pitch. New here? Press “How to use Vowel Lab” for a guided tour of the page; it only points things out and changes nothing.'),
       guide),
     bar,
     stage1,
@@ -1853,13 +1852,14 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
           stale: autoIsStale(), savedId: st.auto.savedId, sourceExpId: st.auto.sourceExpId,
         } : null,
         autoMsg: st.autoMsg,
-        tutorial: { open: tutorial.isOpen, step: tutorial.step },
+        tutorial: { open: tutorial.isOpen, step: tutorial.step, stepId: tutorial.stepId },
       };
     },
     /** For automated checks: the samples of a recording, and a render of the saved recipe. */
     testHooks: {
       recordingSamples: (id) => Array.from(recById(id).samples),
       renderSaved: () => { const s = savedFor(st.work.id); const y = s && synthRender(s); return y && { sampleRate: y.sampleRate, samples: Array.from(y.samples) }; },
+      tourTargetRect: () => tutorial.targetRect(),
       renderAuto: () => { const y = autoRender(); return y && { sampleRate: y.sampleRate, samples: Array.from(y.samples) }; },
       peakAt: (which, freq) => {
         const s = which === 'orig' ? origSpec : synthSpec;

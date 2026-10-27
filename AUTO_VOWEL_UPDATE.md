@@ -245,18 +245,33 @@ The links were checked by search. The DOI pages themselves could not be opened f
 
 ---
 
-## 7. Tutorial popup (added after assignment 3)
+## 7. Guided tour: “How to use Vowel Lab”
 
-Vowel Lab now has a **❓ How to use Vowel Lab** button at the top (next to the Vowel Lab title). It opens a 10-step popup:
+The **❓ How to use Vowel Lab** button sits next to the Vowel Lab title. It starts a 24-step guided tour over the real page, built the same way as the Motion Score walkthrough.
 
-1. purpose, 2. recording, 3. steady section, 4. finding f0 by hand (4 ms → 250 Hz), 5. harmonic sliders (200/400/600 Hz) and reset options, 6. comparing, 7. saving and downloads, 8. duplicates A/B, 9. automatic synthesis, 10. wrap-up.
+Each step:
+- scrolls to one real control (vertically, and sideways where needed);
+- outlines it with a bright highlight and dims the rest of the page;
+- shows a one- or two-sentence card beside it, not on top of it.
 
-- **Next / ← Back / ✕ Close** on every step. It shows “Step N of 10” with a progress bar and dots to jump to any step.
-- The keyboard works: Tab, Enter, ←/→ and Escape.
-- Clicking outside the box closes it.
-- It fits a phone-size screen.
-- **👀 Show me on the page** closes the popup and scrolls to the part of the page being described.
-- The automatic section has its own **❓ Explain this section** button, which opens step 9.
-- The tutorial only reads. It never records, plays, saves or changes settings, recordings or experiments, and `scripts/verify-tutorial.mjs` checks that stored data is byte-for-byte unchanged.
+The tour covers, in order: the experiment selector, the vowel/pitch labels, the reference tone, recording, choosing a take, the steady section, the waveform, the spectrum, entering f0, the harmonic sliders, the reset options, the listen buttons, the spectrum comparison, and automatic synthesis (Analyze, the estimate, the table, playback, spectra, saving). It ends with saving, downloads, returning to an experiment, trying another pitch, and a wrap-up.
 
-Files: `src/pages/frequency/vowel-tutorial.js` (new), `test/vowel-tutorial.test.js` (new), and `scripts/verify-tutorial.mjs` (new; 22 browser checks). It is wired into `vowel-lab.js`, with styles in `style.css`.
+How it behaves:
+- **Next / ← Back / ✕ Skip tour** and a “Step N of 24” counter on every step.
+- **←/→** keys move between steps, and **Escape** closes. Focus goes back to the button that opened the tour.
+- **❓ Explain this section** in the automatic section starts the tour at the Analyze vowel step.
+- If a control isn’t there yet (no recording, or no analysis), the step highlights the button that makes it appear (Import a WAV / Analyze vowel) and shows a yellow note explaining what to do.
+- The highlight and card follow page scrolling and window resizing. On a phone the card goes above or below the control.
+- While the tour is open, the sticky header and listening bar scroll with the page so they cannot hide the highlighted control. They return to normal when it closes.
+- The tour only scrolls and highlights. It never records, plays, moves a slider or saves. The page stays usable underneath, so you can try the highlighted control yourself.
+
+Fixed along the way: on phone-sized screens, parts of the Vowel Lab (harmonic rows, the two-column stages) used to stretch wider than the screen. They now fit the width.
+
+Files:
+- `src/pages/frequency/vowel-tutorial.js` (the tour)
+- `src/pages/frequency/vowel-lab.js` (wiring)
+- `src/style.css`
+- `test/vowel-tutorial.test.js` (steps point at real controls, short text, workflow order)
+- `scripts/verify-tutorial.mjs` (24 browser checks at desktop and phone size, with and without a recording, including that stored data is unchanged)
+
+`src/lib/tour.js` and Motion Score were not changed.
