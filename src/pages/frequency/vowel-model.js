@@ -4,7 +4,9 @@
 //
 // Nothing in this file estimates a fundamental or fits amplitudes to a
 // recording. The person listening chooses every value; these helpers only
-// calculate what those choices produce.
+// calculate what those choices produce. The automatic analysis of
+// assignment 3 lives separately in auto-vowel.js; an experiment it created is
+// marked origin 'auto' and carries a summary of that analysis.
 
 export const MIN_HARMONICS = 4;
 export const MAX_HARMONICS = 48;
@@ -319,7 +321,8 @@ export function vowelDescription(e) {
 /** "ah — lower pitch", plus the comparison type for a duplicate. */
 export function experimentLabel(e) {
   const tag = e.comparison === 'A' ? ' · A: same amplitudes' : e.comparison === 'B' ? ' · B: new recording' : '';
-  return `${vowelName(e)} — ${pitchName(e)} pitch${tag}`;
+  const auto = e.origin === 'auto' ? ' · automatic' : '';
+  return `${vowelName(e)} — ${pitchName(e)} pitch${auto}${tag}`;
 }
 
 export function slug(text) {
@@ -327,9 +330,9 @@ export function slug(text) {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'x';
 }
 
-/** File name stem: ah_lower, ah_higher_sameamps (comparison A). */
+/** File name stem: ah_lower, ah_higher_sameamps (comparison A), oo_lower_auto (automatic). */
 export function fileBase(e) {
-  return `${slug(vowelName(e))}_${slug(pitchName(e))}${e.comparison === 'A' ? '_sameamps' : ''}`;
+  return `${slug(vowelName(e))}_${slug(pitchName(e))}${e.origin === 'auto' ? '_auto' : ''}${e.comparison === 'A' ? '_sameamps' : ''}`;
 }
 
 export function makeExperiment(p = {}) {
@@ -350,6 +353,9 @@ export function makeExperiment(p = {}) {
     parentId: p.parentId || null,
     parentLabel: p.parentLabel || null,
     parentF0: Number.isFinite(p.parentF0) ? p.parentF0 : null,
+    // 'manual' (sliders set by hand) or 'auto' (created by "Save automatic result").
+    origin: p.origin === 'auto' ? 'auto' : 'manual',
+    autoAnalysis: p.autoAnalysis && typeof p.autoAnalysis === 'object' ? JSON.parse(JSON.stringify(p.autoAnalysis)) : null,
     createdAt: p.createdAt || new Date().toISOString(),
     savedAt: p.savedAt || null,
   };
@@ -411,6 +417,8 @@ export function settingsDocument(e, { recording = null, nyquist, synthDuration, 
     comparison: e.comparison
       ? { type: e.comparison, meaning: e.comparison === 'A' ? 'Same harmonic amplitudes as the source experiment; only the fundamental was changed.' : 'Same vowel recorded at a new pitch; amplitudes readjusted by ear and eye.', duplicatedFrom: e.parentLabel, sourceFundamentalHz: e.parentF0 }
       : null,
+    origin: e.origin === 'auto' ? 'automatic analysis (assignment 3)' : 'manual (set by ear and eye)',
+    automaticAnalysis: e.autoAnalysis || null,
     fundamentalHz: e.f0,
     harmonicCount: e.count,
     harmonics: harmonicRows(e.f0, e.amps, nyquist ?? Infinity).map((r) => ({
@@ -470,6 +478,8 @@ export function parseSettings(doc) {
     comparison: doc.comparison && doc.comparison.type,
     parentLabel: doc.comparison && doc.comparison.duplicatedFrom,
     parentF0: doc.comparison && Number(doc.comparison.sourceFundamentalHz),
+    origin: doc.automaticAnalysis ? 'auto' : 'manual',
+    autoAnalysis: doc.automaticAnalysis || null,
   });
   return { ok: true, experiment, warnings, recordingName: doc.recording ? doc.recording.name : null, originalFile: doc.files && doc.files.original };
 }

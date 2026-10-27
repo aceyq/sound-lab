@@ -287,6 +287,7 @@ export class VowelAudio {
         voices: this.current.voices.map((v) => ({ n: v.n, freq: v.osc.frequency.value, gain: v.g.gain.value })),
       } : null,
       refFreq: this.current && this.current.kind === 'ref' ? this.current.freq : null,
+      recipe: this.recipe ? { f0: this.recipe.f0, amps: [...this.recipe.amps] } : null,
       originalLevel: this.state === 'original' || this.abPhase === 'original' ? this.level : null,
     };
   }

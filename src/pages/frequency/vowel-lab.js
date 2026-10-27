@@ -2,16 +2,20 @@
 // hand, shape the harmonic amplitudes with sliders, compare, save, and repeat
 // at another pitch.
 //
-// The person does all the judging. Nothing here estimates the fundamental,
-// fits amplitudes, or fills in a vowel: the app only records, plays, draws and
-// calculates what the chosen numbers produce.
+// In stages 1–5 the person does all the judging: nothing there estimates the
+// fundamental, fits amplitudes, or fills in a vowel. The separate "Automatic
+// vowel synthesis" section (assignment 3, auto-vowel.js) does estimate them,
+// only when "Analyze vowel" is pressed, and keeps its result apart from the
+// open experiment until it is saved as a new experiment.
 import { h, fmtHz, fmtTime } from '../../lib/dom.js';
 import * as M from './vowel-model.js';
+import * as AV from './auto-vowel.js';
 import { encodeWav, decodeWav } from './wav.js';
 import { VowelRecorder, recorderCounters } from './recorder.js';
 import { VowelAudio } from './vowel-audio.js';
 import { OverviewView, ZoomWaveView, CompareSpectrumView } from './vowel-plots.js';
 import * as store from './vowel-store.js';
+import { createVowelTutorial, TUTORIAL_STEPS } from './vowel-tutorial.js';
 
 const DURATIONS = [2, 3, 4];
 const REF_SUGGESTIONS = [[110, 'A2 · low voice'], [147, 'D3'], [196, 'G3'], [220, 'A3'], [262, 'C4 · middle C'], [330, 'E4'], [392, 'G4']];
@@ -20,6 +24,7 @@ const RANGES = [1000, 2000, 4000, 5000, 8000];
 const FFT_SIZES = [4096, 8192, 16384];
 const COUNTS = [8, 12, 16, 24, 32, 40, 48];
 const MIN_TAKE_SEC = 0.3;
+const TUTORIAL_AUTO_STEP = TUTORIAL_STEPS.findIndex((s) => s.id === 'auto');
 
 /**
  * opts: { help, micSection, stopOtherAudio(), logChange(text) }
@@ -57,7 +62,13 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
     synthLen: 3,
     storage: { experiments: 'unknown', recordings: 'unknown', expError: '', recError: '' },
     lastMic: mic.status,
+    // Automatic analysis: { result, key, recId, recName, from, to, segment, sourceExpId, savedId }
+    auto: null,
+    autoMsg: null, // { text, bad } shown when there is no result to show
+    audioOwner: 'manual', // whose recipe the synthesizer is playing: 'manual' sliders or 'auto'
   };
+  let autoOrigSpec = null;
+  let autoSynthSpec = null;
   let origSpec = null; // { key, rel: {db, binHz}, frames, padded }
   let synthSpec = null;
   let synthSpecDirty = true;
@@ -74,6 +85,8 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
 
   // ───────────── shared building blocks ─────────────
   const el = {};
+  // Click-through tutorial popup. It only explains; it changes nothing.
+  const tutorial = createVowelTutorial();
   const stage = (num, title, sub, ...children) => h('section', { class: 'card vl-stage', 'data-stage': num, 'aria-label': `Stage ${num}: ${title}` },
     h('div', { class: 'vl-stage-head' }, h('span', { class: 'vl-num' }, String(num)), h('div', {}, h('h2', {}, title), h('p', { class: 'muted vl-sub' }, sub))),
     ...children);
@@ -142,7 +155,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
       h('li', {}, h('strong', {}, 'Compare and save. '), 'Alternate Original and Synthesized, write what matches and what does not, and download the WAVs and settings.'),
       h('li', {}, h('strong', {}, 'Repeat at another pitch. '), 'Duplicate the experiment, then either keep the same amplitudes (A) or record again and readjust (B).'),
     ),
-    h('p', { class: 'muted' }, 'The app never estimates the fundamental, fits the sliders, or supplies vowel presets. The starting recipe is a neutral 1/n tone that does not sound like any vowel.'),
+    h('p', { class: 'muted' }, 'In these five stages the app never estimates the fundamental, fits the sliders, or supplies vowel presets. The starting recipe is a neutral 1/n tone that does not sound like any vowel. The separate “Automatic vowel synthesis” section below stage 2 does estimate them, but only when you press “Analyze vowel”, and it never changes your sliders or saved experiments.'),
     el.storageNote = h('p', { class: 'note vl-storage' }),
   );
 
@@ -268,6 +281,80 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
     ),
   );
 
+  // ───────────── automatic vowel synthesis (assignment 3) ─────────────
+  // Kept apart from the manual experiment: the result lives in st.auto, has
+  // its own playback buttons and downloads, and only becomes an experiment
+  // when "Save automatic result" creates a NEW one. The open experiment's
+  // sliders are never changed by it.
+  el.autoSource = h('p', { class: 'vl-auto-source' });
+  el.autoAnalyze = h('button', { class: 'btn primary big', onclick: () => runAuto() }, '🔍 Analyze vowel');
+  el.autoStatus = h('div', { class: 'vl-auto-status', role: 'status', 'aria-live': 'polite' });
+  el.autoF0 = h('input', { type: 'text', inputmode: 'decimal', class: 'num vl-f0-input', id: 'vl-auto-f0', 'aria-label': 'Estimated fundamental (Hz)' });
+  el.autoF0Tag = h('span', { class: 'vl-auto-tag' });
+  el.autoF0Msg = h('span', { class: 'msg' });
+  el.autoRemeasure = h('button', { class: 'btn small', onclick: () => remeasureAuto() }, 'Re-measure harmonics at this fundamental');
+  el.autoRevert = h('button', { class: 'btn small', onclick: () => runAuto() }, 'Back to the automatic estimate');
+  el.autoF0.addEventListener('keydown', (e) => { if (e.key === 'Enter') remeasureAuto(); });
+  el.autoReliab = h('div', { class: 'vl-auto-reliab' });
+  el.autoTable = h('div', { class: 'vl-auto-table' });
+  el.autoPlayOrig = h('button', { class: 'btn vl-orig-btn', 'aria-label': 'Play Original (analyzed section)', onclick: () => playAutoOriginal() }, '▶ Play Original');
+  el.autoPlaySynth = h('button', { class: 'btn vl-synth-btn', 'aria-label': 'Play Synthesized (automatic)', onclick: () => playAutoSynth() }, '▶ Play Synthesized');
+  el.autoPlayAB = h('button', { class: 'btn', 'aria-label': 'Original → Synthesized (automatic)', title: 'Plays the analyzed section, a short pause, then the automatic synthesis for the same length.', onclick: () => playAutoAlternate() }, '⇄ Original → Synthesized');
+  el.autoStop = h('button', { class: 'btn', 'aria-label': 'Stop (automatic section)', onclick: () => stopAudio() }, '■ Stop');
+  el.autoNow = h('span', { class: 'vl-now', role: 'status', 'aria-live': 'polite' });
+  el.autoSave = h('button', { class: 'btn primary', onclick: () => saveAuto() }, '💾 Save automatic result');
+  el.autoDlWav = h('button', { class: 'btn', onclick: () => downloadAutoWav() }, '⬇ Download synthesized WAV');
+  el.autoDlJson = h('button', { class: 'btn', onclick: () => downloadAutoJson() }, '⬇ Download analysis/settings');
+  el.autoSaveMsg = h('div', { class: 'help vl-auto-save-msg', 'aria-live': 'polite' });
+  el.autoSpec = h('canvas', { class: 'plot vl-spec', role: 'img', 'aria-label': 'Spectrum of the analyzed section and of the automatic synthesis on one frequency axis' });
+  el.autoHover = h('span', { class: 'mono muted' });
+
+  const stageAuto = h('section', { class: 'card vl-stage vl-auto', 'data-stage': 'auto', 'aria-label': 'Automatic vowel synthesis' },
+    h('div', { class: 'vl-stage-head' }, h('span', { class: 'vl-num' }, '⚙'), h('div', {},
+      h('h2', {}, 'Automatic vowel synthesis'),
+      h('p', { class: 'muted vl-sub' }, 'Assignment 3: let the app measure the fundamental and harmonics, then compare.')),
+      h('button', { class: 'btn small vt-section-help', type: 'button', onclick: () => tutorial.open(TUTORIAL_AUTO_STEP) }, '❓ Explain this section')),
+    h('p', { class: 'vl-auto-lead' }, 'The app estimates the base frequency and the strengths of its harmonics from a steady part of your recording, then combines new sine waves to recreate that sound.'),
+    help('It uses the recording and analysis segment chosen in stages 1–2 (the shaded part of the overview). It does not change your sliders or any saved experiment. “Save automatic result” stores it as a separate, new experiment.'),
+    h('div', { class: 'row gap wrap' }, el.autoAnalyze, el.autoSource),
+    el.autoStatus,
+    h('div', { class: 'vl-auto-result' },
+      h('div', { class: 'vl-f0' },
+        h('label', { for: 'vl-auto-f0', class: 'vl-f0-label' }, 'Estimated fundamental (Hz)'),
+        h('div', { class: 'row gap wrap' }, el.autoF0, h('span', {}, 'Hz'), el.autoF0Tag, el.autoRemeasure, el.autoRevert),
+        el.autoF0Msg,
+        help('If the estimate is wrong (for example an octave too high or too low), type the right value and press “Re-measure harmonics”. The result is then labelled a manual correction, because you chose the fundamental, not the app.')),
+      el.autoReliab,
+      h('div', { class: 'row gap wrap vl-transport' }, el.autoPlayOrig, el.autoPlaySynth, el.autoPlayAB, el.autoStop, el.autoNow),
+      help('These buttons play the analyzed section and the automatic synthesis. Volume and “Match peak levels” are shared with the bar at the top.'),
+      h('h3', {}, 'Original and synthesized spectra'),
+      h('div', { class: 'row gap wrap controls' }, h('div', { class: 'seg-group', role: 'group', 'aria-label': 'Frequency range' }, el.rangeButtonsAuto = RANGES.map((f) => h('button', { class: 'btn seg', 'data-max': f, onclick: () => setRange(f) }, `0–${f / 1000} kHz`))), el.autoHover),
+      h('div', { class: 'canvas-box vl-spec-box' }, el.autoSpec),
+      h('p', { class: 'legend' },
+        h('span', { class: 'key vl-key-orig' }), ' original recording (analyzed section)   ',
+        h('span', { class: 'key vl-key-synth' }), ' automatic synthesis   ',
+        h('span', { class: 'key vl-key-mark' }), ' n × estimated f0'),
+      help('This compares the two frequency patterns: how strong each harmonic is. Each curve is shown relative to its own strongest peak. The waveform shapes can still look different, because the synthesis starts every sine at phase 0 and the app did not copy your voice’s phases; two sounds with the same harmonic strengths but different phases can sound alike and still look different.'),
+      h('h3', {}, 'Measured harmonic strengths'),
+      el.autoTable,
+      h('h3', {}, 'Keep the result'),
+      h('div', { class: 'row gap wrap' }, el.autoSave, el.autoDlWav, el.autoDlJson),
+      el.autoSaveMsg,
+    ),
+    details('How the automatic analysis works, and its settings (click to open)',
+      h('ol', {},
+        h('li', {}, h('strong', {}, 'Frames. '), `The section is cut into up to ${AV.AUTO_SETTINGS.maxFrames} short overlapping frames (one every ${AV.AUTO_SETTINGS.hopSec * 1000} ms or more), so one unusual moment cannot decide the result.`),
+        h('li', {}, h('strong', {}, 'Fundamental (YIN). '), `For each frame the app compares the wave with copies of itself shifted by every lag between 1/${AV.AUTO_SETTINGS.f0Max} s and 1/${AV.AUTO_SETTINGS.f0Min} s (${AV.AUTO_SETTINGS.f0Min}–${AV.AUTO_SETTINGS.f0Max} Hz). The first lag where the shifted copy matches well (normalized difference below ${AV.AUTO_SETTINGS.yinThreshold}) is one period. Lags are counted in samples at the recording’s own sample rate, and the true period is found between samples by fitting a parabola. This does not look at which spectrum peak is tallest, so a strong 2nd or 3rd harmonic does not fool it. The estimate is the median over the frames that repeat clearly.`),
+        h('li', {}, h('strong', {}, 'Harmonics (Fourier). '), `Each clear frame (at least ${AV.AUTO_SETTINGS.harmonicPeriods} periods and ${AV.AUTO_SETTINGS.harmonicMinSec * 1000} ms long) gets a Hann window and a zero-padded FFT (${AV.AUTO_SETTINGS.zeroPad}× the frame length, for finer frequency points). Near each n × f0 (that frame’s own f0, within ±${AV.AUTO_SETTINGS.searchFrac} × f0) the highest point is refined by quadratic interpolation, because a harmonic usually falls between FFT points.`),
+        h('li', {}, h('strong', {}, 'Noise. '), `A harmonic counts only if its peak is at least ${AV.AUTO_SETTINGS.minProminenceDb} dB above the local noise floor (the median level between harmonics) in at least ${AV.AUTO_SETTINGS.minPresence * 100} % of the frames. Its strength is the median over those frames. Others are set to 0.`),
+        h('li', {}, h('strong', {}, 'Limits. '), `At most ${M.MAX_HARMONICS} harmonics (the app’s limit), and only those below the Nyquist frequency (half the sample rate). The strongest harmonic becomes amplitude 1; the rest keep their measured ratios. Values below ${AV.AUTO_SETTINGS.floorRelDb} dB of the strongest become 0.`),
+        h('li', {}, h('strong', {}, 'Synthesis. '), `A complete new set of ${M.MAX_HARMONICS} amplitudes (all others 0) drives the same additive synthesizer as the sliders: Σ Aₙ sin(2π n f0 t). The whole sound is scaled so its peak is ${M.OUTPUT_PEAK}; that one shared scale factor does not change the ratios between harmonics.`),
+      ),
+      h('p', {}, h('strong', {}, 'Reliability numbers. '), '“Periodic frames” counts frames whose YIN aperiodicity is below ' + AV.AUTO_SETTINGS.periodicMax + '. Aperiodicity is YIN’s normalized difference at the chosen period: 0 means the wave repeats exactly, about 1 means it does not repeat. “Pitch spread” is how far apart the middle half of the frame estimates are, in cents (100 cents = one semitone). None of these is a probability or a percentage chance of being right; they describe how steady and repeating the section was.'),
+      h('p', { class: 'muted' }, 'Sources: de Cheveigné & Kawahara (2002), “YIN, a fundamental frequency estimator for speech and music”, JASA 111(4); Harris (1978), “On the use of windows for harmonic analysis with the DFT”, Proc. IEEE 66(1); J. O. Smith, Spectral Audio Signal Processing (CCRMA), “Quadratic interpolation of spectral peaks”. See AUTO_VOWEL_UPDATE.md for links and alternatives.'),
+    ),
+  );
+
   // ───────────── stage 3: harmonics ─────────────
   el.count = h('select', { 'aria-label': 'Number of harmonics', onchange: (e) => setCount(Number(e.target.value)) }, COUNTS.map((n) => h('option', { value: String(n) }, String(n))));
   el.scaleLin = h('button', { class: 'btn seg', onclick: () => setSliderScale('lin') }, 'Linear 0–1');
@@ -381,12 +468,15 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
 
   const element = h('section', { class: 'vowel-lab', id: 'vowel-lab', 'aria-label': 'Vowel Lab' },
     h('div', { class: 'card vl-intro' },
-      h('h2', {}, '🗣 Vowel Lab: recreate a sung vowel with harmonic sliders'),
-      h('p', { class: 'muted' }, 'Record → inspect → set the fundamental → adjust harmonics → compare → save → repeat at another pitch.'),
+      h('div', { class: 'vl-intro-head' },
+        h('h2', {}, '🗣 Vowel Lab: recreate a sung vowel with harmonic sliders'),
+        tutorial.button),
+      h('p', { class: 'muted' }, 'Record → inspect → set the fundamental → adjust harmonics → compare → save → repeat at another pitch. New here? Press “How to use Vowel Lab” for a 10-step walkthrough; it changes nothing.'),
       guide),
     bar,
     stage1,
     stage2,
+    stageAuto,
     h('div', { class: 'vl-shape-grid' }, stage3, stage4),
     stage5,
   );
@@ -397,7 +487,9 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
   const zoom4 = new ZoomWaveView(el.zoom4);
   const spec2 = new CompareSpectrumView(el.spec2);
   const spec4 = new CompareSpectrumView(el.spec4);
-  for (const v of [overview, zoom, zoom4, spec2, spec4]) v.onResize = () => { canvasesDirty = true; };
+  const specAuto = new CompareSpectrumView(el.autoSpec);
+  st.hoverAuto = null;
+  for (const v of [overview, zoom, zoom4, spec2, spec4, specAuto]) v.onResize = () => { canvasesDirty = true; };
 
   const pointerCleanups = [];
   const on = (target, ev, fn) => { target.addEventListener(ev, fn); pointerCleanups.push(() => target.removeEventListener(ev, fn)); };
@@ -437,7 +529,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
     canvasesDirty = true;
     updateCursorText();
   });
-  for (const [canvas, key] of [[el.spec2, 'hover2'], [el.spec4, 'hover4']]) {
+  for (const [canvas, key] of [[el.spec2, 'hover2'], [el.spec4, 'hover4'], [el.autoSpec, 'hoverAuto']]) {
     on(canvas, 'pointermove', (e) => { st[key] = localX(canvas, e); canvasesDirty = true; });
     on(canvas, 'pointerleave', () => { st[key] = null; canvasesDirty = true; });
   }
@@ -573,7 +665,8 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
 
   function onRecipeChange(allRows) {
     if (allRows) for (let i = 0; i < rowEls.length; i++) updateRow(i);
-    audio.updateRecipe(recipe());
+    // Slider edits steer the synthesizer only while it plays the manual recipe.
+    if (st.audioOwner === 'manual') audio.updateRecipe(recipe());
     synthSpecDirty = true;
     canvasesDirty = true;
     updateF0Displays();
@@ -582,6 +675,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
     updateCursorText();
     updatePinText();
     renderPitchInfo();
+    if (st.auto) renderAuto(); // its table shows the open sliders for comparison
   }
 
   // ───────────── harmonic rows ─────────────
@@ -823,6 +917,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
     syncSegmentInputs();
     updateSaveState();
     updateCursorText();
+    renderAuto();
     logChange(`Analysis segment: ${st.work.segment.start}–${st.work.segment.end} s.`, 'vl-seg');
   }
 
@@ -950,7 +1045,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
 
   function setRange(f) {
     st.range = f;
-    for (const b of [...el.rangeButtons2, ...el.rangeButtons4]) b.setAttribute('aria-pressed', String(Number(b.dataset.max) === f));
+    for (const b of [...el.rangeButtons2, ...el.rangeButtons4, ...el.rangeButtonsAuto]) b.setAttribute('aria-pressed', String(Number(b.dataset.max) === f));
     canvasesDirty = true;
   }
 
@@ -959,6 +1054,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
     el.fft2.value = String(n);
     origSpec = null;
     synthSpecDirty = true;
+    computeAutoSpecs();
     canvasesDirty = true;
   }
 
@@ -1015,12 +1111,14 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
     const rec = workRec();
     if (!rec || !guardPlay()) return;
     const { from, to } = st.scope === 'whole' ? { from: 0, to: rec.samples.length } : segSamples(rec);
+    st.audioOwner = 'manual';
     audio.playOriginal(rec, { from, to, levelMatch: st.levelMatch });
     logChange(`Playing original “${rec.name}” (${st.scope === 'whole' ? 'whole recording' : 'analysis segment'}).`);
   }
 
   function playSynth() {
     if (!guardPlay()) return;
+    st.audioOwner = 'manual';
     audio.playSynth(recipe());
     logChange(`Playing synthesized sound: f0 ${fmtHz(st.work.f0)}, ${st.work.count} harmonics (until Stop; sliders change it live).`);
   }
@@ -1029,6 +1127,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
     const rec = workRec();
     if (!rec || !guardPlay()) return;
     const { from, to } = st.scope === 'whole' ? { from: 0, to: rec.samples.length } : segSamples(rec);
+    st.audioOwner = 'manual';
     audio.playAlternate(rec, recipe(), { from, to, levelMatch: st.levelMatch });
     logChange('Alternating: original, a short pause, then synthesized for the same length.');
   }
@@ -1047,6 +1146,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
   function toggleReference() {
     if (audio.state === 'ref') { audio.stop(); return; }
     if (!commitRef() || !guardPlay()) return;
+    st.audioOwner = 'manual';
     audio.playReference(st.refFreq);
     logChange(`Reference tone ${fmtHz(st.refFreq)} playing (quiet). Stop it before recording.`);
   }
@@ -1065,15 +1165,307 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
       synth: '▶ Now playing: SYNTHESIZED',
       ab: { original: '⇄ 1/2 Now playing: ORIGINAL', gap: '⇄ pause…', synth: '⇄ 2/2 Now playing: SYNTHESIZED' }[audio.abPhase] || '⇄',
     };
-    el.nowPlaying.textContent = labels[audio.state];
+    const autoTag = st.audioOwner === 'auto' && (audio.state === 'synth' || audio.abPhase === 'synth') ? ' (automatic)' : '';
+    el.nowPlaying.textContent = labels[audio.state] + autoTag;
     const playingWhat = audio.state === 'original' || audio.abPhase === 'original' ? 'orig' : audio.state === 'synth' || audio.abPhase === 'synth' ? 'synth' : audio.state === 'ref' ? 'ref' : '';
     el.nowPlaying.className = 'vl-now ' + playingWhat;
+    updateAutoTransport(labels[audio.state] + autoTag, playingWhat);
     el.refBtn.textContent = audio.state === 'ref' ? '■ Stop reference tone' : '♪ Play reference tone';
     el.refBtn.setAttribute('aria-pressed', String(audio.state === 'ref'));
     el.transportNote.textContent = !rec
       ? 'Record or choose a recording to enable Play Original. Play Synthesized works any time.'
       : `Original: “${rec.name}”, ${st.scope === 'whole' ? 'whole recording' : `segment ${st.work.segment.start}–${st.work.segment.end} s`}. Only one sound plays at a time.` +
         (st.levelMatch ? ' Peaks are matched (equal peaks are not equal loudness).' : ' The original plays at its recorded level.');
+  }
+
+  // ───────────── automatic analysis (assignment 3) ─────────────
+  const autoRec = () => (st.auto ? recById(st.auto.recId) : null);
+  const autoUsable = () => !!(st.auto && st.auto.result.amps && autoRec());
+  const autoRecipe = () => ({ f0: st.auto.result.f0, amps: st.auto.result.amps });
+
+  function autoKeyFor(rec) {
+    const { from, to } = segSamples(rec);
+    return `${rec.id}:${from}:${to}`;
+  }
+
+  /** True when the open experiment's recording or segment changed after the analysis. */
+  function autoIsStale() {
+    if (!st.auto) return false;
+    const rec = workRec();
+    return !rec || autoKeyFor(rec) !== st.auto.key;
+  }
+
+  function runAuto(f0Override = null) {
+    const rec = workRec();
+    if (st.audioOwner === 'auto') stopAudio();
+    if (!rec) {
+      st.auto = null;
+      st.autoMsg = { text: 'Choose a recording first: record a vowel, or press “Use in this experiment” next to a saved recording in stage 1. Then pick a steady segment in stage 2.', bad: true };
+      computeAutoSpecs();
+      renderAuto();
+      return;
+    }
+    const { from, to } = segSamples(rec);
+    const t0 = performance.now();
+    const result = AV.analyzeVowel(rec.samples, rec.sampleRate, { from, to, f0Override });
+    const w = st.work;
+    st.auto = {
+      result, key: autoKeyFor(rec), recId: rec.id, recName: rec.name, from, to,
+      segment: { start: round3(from / rec.sampleRate), end: round3(to / rec.sampleRate) },
+      sourceExpId: w.id, source: { vowel: w.vowel, vowelText: w.vowelText, pitch: w.pitch, pitchText: w.pitchText },
+      savedId: null, ms: performance.now() - t0,
+    };
+    st.autoMsg = null;
+    computeAutoSpecs();
+    renderAuto();
+    logChange(result.amps
+      ? `Automatic analysis of “${rec.name}” ${st.auto.segment.start}–${st.auto.segment.end} s: f0 ${fmtHz(result.f0)} (${result.f0Source === 'manual' ? 'manual correction' : 'automatic'}), ${result.harmonics.filter((x) => x.kept).length} harmonics kept. Your sliders were not changed.`
+      : `Automatic analysis of “${rec.name}” found no reliable result: ${result.problems.map((p) => p.code).join(', ')}.`);
+  }
+
+  function remeasureAuto() {
+    const rec = workRec();
+    const r = M.parseFundamental(el.autoF0.value, rec ? rec.sampleRate / 2 : Infinity);
+    el.autoF0Msg.textContent = r.ok ? '' : r.error;
+    el.autoF0.classList.toggle('invalid', !r.ok);
+    if (!r.ok) return;
+    const auto = st.auto && !autoIsStale() ? st.auto.result.f0Auto : null;
+    // Typing back the automatic value is not a correction.
+    if (auto != null && Math.abs(r.value - Math.round(auto * 100) / 100) < 0.005) runAuto();
+    else runAuto(r.value);
+  }
+
+  function computeAutoSpecs() {
+    autoOrigSpec = null;
+    autoSynthSpec = null;
+    canvasesDirty = true;
+    const a = st.auto;
+    const rec = autoRec();
+    if (!a || !rec) return;
+    const N = st.fftSize;
+    const s = M.segmentSpectrum(rec.samples, rec.sampleRate, { from: a.from, to: a.to, fftSize: N });
+    autoOrigSpec = { rel: { db: M.relativeToMax(s.db, s.binHz).db, binHz: s.binHz } };
+    const r = a.result;
+    if (!r.amps) return;
+    const sr = rec.sampleRate;
+    const g = M.outputGain(r.f0, r.amps, sr / 2);
+    if (g === 0) return;
+    // Same analysis as the original: same sample rate, FFT size, window, averaging.
+    const segN = a.to - a.from;
+    const len = segN < N ? segN : Math.min(segN, 3 * N);
+    const y = M.renderRecipe({ f0: r.f0, amps: r.amps, sampleRate: sr, duration: len / sr, gain: g, fadeSec: 0 });
+    const ss = M.segmentSpectrum(y, sr, { fftSize: N });
+    autoSynthSpec = { rel: { db: M.relativeToMax(ss.db, ss.binHz).db, binHz: ss.binHz } };
+  }
+
+  function playAutoOriginal() {
+    const rec = autoRec();
+    if (!st.auto || !rec || !guardPlay()) return;
+    st.audioOwner = 'auto';
+    audio.playOriginal(rec, { from: st.auto.from, to: st.auto.to, levelMatch: st.levelMatch });
+    logChange(`Playing original “${rec.name}” (analyzed section ${st.auto.segment.start}–${st.auto.segment.end} s).`);
+  }
+
+  function playAutoSynth() {
+    if (!autoUsable() || !guardPlay()) return;
+    st.audioOwner = 'auto';
+    audio.playSynth(autoRecipe());
+    logChange(`Playing the automatic synthesis: f0 ${fmtHz(st.auto.result.f0)}, new sine waves from the measured harmonic strengths (until Stop).`);
+  }
+
+  function playAutoAlternate() {
+    if (!autoUsable() || !guardPlay()) return;
+    st.audioOwner = 'auto';
+    audio.playAlternate(autoRec(), autoRecipe(), { from: st.auto.from, to: st.auto.to, levelMatch: st.levelMatch });
+    logChange('Alternating: analyzed section, a short pause, then the automatic synthesis for the same length.');
+  }
+
+  function updateAutoTransport(label, playingWhat) {
+    const busy = st.rec.state !== 'idle';
+    el.autoPlayOrig.disabled = !(st.auto && autoRec()) || busy;
+    el.autoPlaySynth.disabled = !autoUsable() || busy;
+    el.autoPlayAB.disabled = !autoUsable() || busy;
+    el.autoStop.disabled = !audio.playing;
+    const mine = st.audioOwner === 'auto' && audio.playing;
+    el.autoNow.textContent = mine ? label : '';
+    el.autoNow.className = 'vl-now ' + (mine ? playingWhat : '');
+  }
+
+  /** The experiment record an automatic result would be saved as (labels from the experiment it was analyzed in). */
+  function autoExperimentRecord() {
+    const a = st.auto;
+    const saved = a.savedId ? savedFor(a.savedId) : null;
+    if (saved) return saved;
+    return AV.autoExperiment(a.result, { ...a.source, recordingId: a.recId, segment: a.segment });
+  }
+
+  function saveAuto() {
+    const a = st.auto;
+    if (!autoUsable()) return;
+    if (a.savedId && savedFor(a.savedId)) { renderAuto(); return; }
+    const exp = AV.autoExperiment(a.result, { ...a.source, recordingId: a.recId, segment: a.segment });
+    exp.savedAt = new Date().toISOString();
+    // Appended as a new experiment: no existing experiment is replaced or edited.
+    st.saved.push(M.snapshot(exp));
+    persistExperiments();
+    a.savedId = exp.id;
+    renderExpSelect();
+    renderExpTable();
+    updateSaveState();
+    logChange(`Saved the automatic result as a new experiment “${M.experimentLabel(exp)}” (f0 ${fmtHz(exp.f0)}). Your other experiments were not changed.`);
+    renderAuto();
+  }
+
+  function autoRender() {
+    if (!autoUsable()) return null;
+    const sr = autoRec().sampleRate;
+    const r = st.auto.result;
+    const g = M.outputGain(r.f0, r.amps, sr / 2);
+    return { samples: M.renderRecipe({ f0: r.f0, amps: r.amps, sampleRate: sr, duration: st.synthLen, gain: g }), sampleRate: sr };
+  }
+
+  function downloadAutoWav() {
+    const y = autoRender();
+    if (!y) return;
+    download(`${M.fileBase(autoExperimentRecord())}_synthesized.wav`, new Blob([encodeWav(y.samples, y.sampleRate).buffer], { type: 'audio/wav' }));
+  }
+
+  function autoDetails(r) {
+    return {
+      method: 'YIN fundamental per frame (median of periodic frames), then Hann-windowed zero-padded FFT per frame with quadratic peak interpolation near n × f0; median strength over the frames where the harmonic stood out from the local noise floor.',
+      f0Source: r.f0Source,
+      automaticF0Hz: r.f0Auto,
+      usedF0Hz: r.f0,
+      status: r.status,
+      problems: r.problems.map((p) => p.message),
+      warnings: r.warnings.map((w) => w.message),
+      settings: r.settings,
+      sectionSec: [r.segment.startSec, r.segment.endSec],
+      sampleRate: r.sampleRate,
+      nyquistHz: r.sampleRate / 2,
+      stats: r.stats,
+      measurement: r.measurement || null,
+      harmonics: r.harmonics.map((x) => ({
+        n: x.n, frequencyHz: Math.round(x.freq * 100) / 100, amplitudeUsed: x.value, relativeDb: x.relDb == null ? null : Math.round(x.relDb * 10) / 10,
+        framesFound: x.framesFound, presence: Math.round(x.presence * 100) / 100, prominenceDb: x.prominenceDb == null ? null : Math.round(x.prominenceDb * 10) / 10,
+        kept: x.kept, reason: x.reason || null,
+      })),
+      frames: r.frames,
+      reliabilityNote: 'periodicShare, spreadCents and medianAperiodicity describe how steady and repeating the section was. None of them is a probability.',
+    };
+  }
+
+  function downloadAutoJson() {
+    const a = st.auto;
+    const rec = autoRec();
+    if (!a || !rec) return;
+    const r = a.result;
+    const sr = rec.sampleRate;
+    let doc;
+    let name;
+    if (r.amps) {
+      const exp = autoExperimentRecord();
+      doc = M.settingsDocument(exp, { recording: rec, nyquist: sr / 2, synthDuration: st.synthLen, sampleRate: sr });
+      doc.automaticAnalysisDetails = autoDetails(r);
+      name = `${M.fileBase(exp)}_analysis.json`;
+    } else {
+      // A failed analysis is still worth documenting; it is not an importable recipe.
+      doc = { format: 'frequency-playground.vowel-auto-analysis', version: 1, createdAt: new Date().toISOString(), recording: { name: rec.name, sampleRate: sr }, result: 'no reliable result', automaticAnalysisDetails: autoDetails(r) };
+      name = `${M.fileBase({ ...a.source, origin: 'auto' })}_analysis_failed.json`;
+    }
+    download(name, new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' }));
+  }
+
+  function renderAuto() {
+    const rec = workRec();
+    const a = st.auto;
+    const stale = autoIsStale();
+    el.autoSource.replaceChildren(rec
+      ? h('span', {}, 'Will analyze ', h('strong', {}, `“${rec.name}”`), `, segment ${st.work.segment ? `${round3(st.work.segment.start)}–${round3(st.work.segment.end)} s` : '—'} at ${rec.sampleRate.toLocaleString('en-US')} Hz (change it in stages 1–2).`)
+      : h('span', { class: 'muted' }, 'No recording in the open experiment yet. Record or choose one in stage 1, then pick a steady segment in stage 2.'));
+    el.autoAnalyze.disabled = !rec;
+
+    const r = a && a.result;
+    el.autoF0Tag.textContent = !r || !r.f0 ? '' : r.f0Source === 'manual' ? '✎ manual correction' : '✓ automatic estimate';
+    el.autoF0Tag.className = 'vl-auto-tag ' + (r && r.f0Source === 'manual' ? 'manual' : 'automatic');
+    if (document.activeElement !== el.autoF0) el.autoF0.value = r && r.f0 ? String(r.f0) : '';
+    el.autoF0.disabled = !a;
+    el.autoRemeasure.disabled = !a;
+    el.autoRevert.hidden = !(r && r.f0Source === 'manual' && r.f0Auto != null);
+
+    if (!a) {
+      el.autoStatus.replaceChildren(st.autoMsg
+        ? h('p', { class: st.autoMsg.bad ? 'vl-bad' : 'muted' }, st.autoMsg.text)
+        : h('p', { class: 'muted' }, 'Press “Analyze vowel” to measure the selected segment.'));
+      el.autoReliab.replaceChildren();
+      el.autoTable.replaceChildren();
+      el.autoSaveMsg.replaceChildren();
+      el.autoSave.disabled = true;
+      el.autoDlWav.disabled = true;
+      el.autoDlJson.disabled = true;
+      updateTransport();
+      return;
+    }
+    const chip = r.status === 'failed' ? ['✗ No reliable result', 'bad'] : r.status === 'warning' ? ['⚠ Result with warnings', 'warn'] : ['✓ Result looks usable', 'good'];
+    el.autoStatus.replaceChildren(
+      h('p', {}, h('span', { class: 'vl-auto-chip ' + chip[1] }, chip[0]), ' ',
+        h('span', { class: 'muted' }, `Analyzed “${a.recName}” ${a.segment.start}–${a.segment.end} s in ${Math.round(a.ms)} ms.`)),
+      stale ? h('p', { class: 'vl-bad' }, 'The recording or segment has changed since this analysis. Press “Analyze vowel” again to measure the new selection.') : '',
+      r.problems.length ? h('ul', { class: 'vl-auto-problems' }, r.problems.map((p) => h('li', {}, p.message))) : '',
+      r.warnings.length ? h('ul', { class: 'vl-auto-warnings' }, r.warnings.map((w) => h('li', {}, w.message))) : '',
+    );
+
+    const S = r.stats;
+    const kept = r.harmonics.filter((x) => x.kept);
+    const m = r.measurement;
+    const line = (label, value, note = '') => h('li', {}, h('strong', {}, label + ': '), value, note ? h('span', { class: 'muted' }, ' ' + note) : '');
+    el.autoReliab.replaceChildren(h('ul', { class: 'vl-auto-facts' },
+      line('Fundamental used', r.f0 ? fmtHz(r.f0) : '—', r.f0Source === 'manual'
+        ? `(typed by you; automatic estimate ${r.f0Auto != null ? fmtHz(Math.round(r.f0Auto * 100) / 100) : 'none'})`
+        : r.f0 ? `(median of ${S.framesPeriodic} periodic frames)` : ''),
+      line('Periodic frames', `${S.framesPeriodic} of ${S.framesTotal}`, `(frames whose YIN aperiodicity is below ${AV.AUTO_SETTINGS.periodicMax}${S.framesSilent ? `; ${S.framesSilent} silent` : ''})`),
+      line('Pitch spread', S.spreadCents == null ? '—' : `${Math.round(S.spreadCents)} cents`, '(middle half of the frame estimates; 100 cents = 1 semitone; small = steady)'),
+      line('Median aperiodicity', S.medianAperiodicity == null ? '—' : S.medianAperiodicity.toFixed(3), '(0 = repeats exactly, about 1 = does not repeat; not a probability)'),
+      line('Level', `${S.rmsDb.toFixed(1)} dBFS average, peak ${(20 * Math.log10(S.peak || 1e-9)).toFixed(1)} dBFS`),
+      m ? line('Harmonics kept', `${kept.length} of ${m.maxN} measurable`, `(limit ${M.MAX_HARMONICS} and below Nyquist ${fmtHz(m.nyquist)}; ${m.framesUsed} frames of ${fmtTime(m.frameSec)}, FFT ${m.fftSize.toLocaleString('en-US')}, points ${m.binHz.toFixed(2)} Hz apart)`) : '',
+      r.strongest ? line('Strongest harmonic', `n = ${r.strongest}`, r.strongest > 1 ? '(stronger than the fundamental; common in vowels, near a vocal-tract resonance)' : '') : '',
+    ));
+
+    if (r.harmonics.length) {
+      const lastKept = kept.length ? kept[kept.length - 1].n : 0;
+      const show = r.harmonics.slice(0, Math.min(r.harmonics.length, Math.max(8, lastKept + 2)));
+      const rest = r.harmonics.length - show.length;
+      el.autoTable.replaceChildren(
+        h('table', { class: 'comps vl-table vl-auto-harm' },
+          h('thead', {}, h('tr', {}, ['n', 'n × f0', 'Measured (dB re strongest)', 'Amplitude used', 'Stood out in', 'Sliders of the open experiment'].map((t) => h('th', { scope: 'col' }, t)))),
+          h('tbody', {}, show.map((x) => h('tr', { class: x.kept ? '' : 'zero' },
+            h('th', { scope: 'row' }, String(x.n)),
+            h('td', { class: 'mono' }, fmtHz(Math.round(x.freq))),
+            h('td', { class: 'mono' }, x.relDb == null ? '—' : `${x.relDb.toFixed(1)} dB`),
+            h('td', { class: 'mono' }, x.kept ? String(x.value) : h('span', { class: 'muted', title: x.reason }, `0 (${x.reason})`)),
+            h('td', { class: 'mono muted' }, `${x.framesFound}/${m ? m.framesUsed : 0} frames`),
+            h('td', { class: 'mono muted' }, st.work.amps[x.n - 1] != null ? String(st.work.amps[x.n - 1]) : '—'))))),
+        h('p', { class: 'help' }, (rest > 0 ? `Harmonics ${show.length + 1}–${r.harmonics.length} did not stand out and are 0. ` : '') +
+          (r.harmonics.length < M.MAX_HARMONICS ? `Harmonics ${r.harmonics.length + 1}–${M.MAX_HARMONICS} would be too close to or above the Nyquist frequency and are 0. ` : '') +
+          `The last column shows the sliders of the experiment open now (“${M.experimentLabel(st.work)}”), for comparison only; the analysis did not read or change them.`));
+    } else el.autoTable.replaceChildren();
+
+    const saved = a.savedId ? savedFor(a.savedId) : null;
+    el.autoSave.disabled = !autoUsable() || !!saved;
+    el.autoSave.textContent = saved ? '✓ Saved as a new experiment' : '💾 Save automatic result';
+    el.autoDlWav.disabled = !autoUsable();
+    el.autoDlJson.disabled = !autoRec();
+    const base = autoUsable() ? M.fileBase(autoExperimentRecord()) : null;
+    el.autoSaveMsg.replaceChildren(
+      saved
+        ? h('span', {}, `Saved as “${M.experimentLabel(saved)}” (${new Date(saved.savedAt).toLocaleTimeString()}). Your other experiments are unchanged. `,
+          saved.id === st.work.id ? h('span', { class: 'muted' }, '(open now)') : h('button', { class: 'btn small', onclick: () => openExperiment(saved.id) }, 'Open it in the sliders'))
+        : autoUsable()
+          ? h('span', {}, 'Not saved yet. “Save automatic result” adds a new experiment; it does not replace the one that is open.')
+          : h('span', { class: 'muted' }, 'There is no synthesis to save. You can still download the analysis to document what happened.'),
+      base ? h('div', { class: 'muted' }, `Files: ${base}_synthesized.wav (${st.synthLen} s, peak ${M.OUTPUT_PEAK}, 20 ms fades) and ${base}_analysis.json (settings, every harmonic, frame-by-frame pitch and the analysis settings).`) : '',
+    );
+    updateTransport();
   }
 
   // ───────────── downloads and import ─────────────
@@ -1184,6 +1576,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
     updateTransport();
     updatePinText();
     updateCursorText();
+    renderAuto();
     for (const k of Object.keys(el.notes)) el.notes[k].value = st.work.notes[k] || '';
     dirtyAll();
   }
@@ -1246,7 +1639,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
         h('span', { class: 'muted vl-rec-src' }, rec.source === 'imported' ? `imported ${rec.fileName || ''}` : 'microphone',
           ' · ', rec.stored === true ? 'kept in this browser' : rec.stored === false ? 'memory only (lost on refresh)' : 'saving…'),
         h('span', { class: 'row gap' },
-          h('button', { class: 'btn small', onclick: () => { if (guardPlay()) audio.playOriginal(rec, { levelMatch: st.levelMatch }); } }, '▶ Play'),
+          h('button', { class: 'btn small', onclick: () => { if (guardPlay()) { st.audioOwner = 'manual'; audio.playOriginal(rec, { levelMatch: st.levelMatch }); } } }, '▶ Play'),
           h('button', { class: 'btn small', onclick: () => download(`${M.slug(rec.name)}.wav`, new Blob([encodeWav(rec.samples, rec.sampleRate).buffer], { type: 'audio/wav' })) }, '⬇ WAV'),
           used ? h('span', { class: 'vl-used' }, '✓ used by this experiment')
             : h('button', { class: 'btn small', onclick: () => useRecording(rec.id) }, 'Use in this experiment'),
@@ -1366,6 +1759,14 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
     const r4 = spec4.render({ ...common, orig: origSpec && origSpec.rel, synth: synthSpec && synthSpec.rel, hoverX: st.hover4, message: ['Nothing to compare yet', 'Record a vowel, or raise a slider to see the synthesized spectrum.'] });
     el.hover2.textContent = readoutText(r2);
     el.hover4.textContent = readoutText(r4);
+    const a = st.auto && st.auto.result;
+    const ra = specAuto.render({
+      min: 0, max: Math.min(st.range, a ? a.sampleRate / 2 : nyq), f0: a && a.f0 ? a.f0 : 0, count: M.MAX_HARMONICS,
+      nyquist: a ? a.sampleRate / 2 : nyq, markers: st.markers && !!(a && a.f0), pinned: null, hoverX: st.hoverAuto,
+      orig: autoOrigSpec && autoOrigSpec.rel, synth: autoSynthSpec && autoSynthSpec.rel,
+      message: ['No automatic result yet', 'Choose a recording and a steady segment, then press Analyze vowel.'],
+    });
+    el.autoHover.textContent = ra && a && a.f0 ? `Cursor ${fmtHz(Math.round(ra.freq))} (≈ harmonic ${(ra.freq / a.f0).toFixed(2)}) · original ${ra.orig == null ? '—' : ra.orig.toFixed(1) + ' dB'} · automatic ${ra.synth == null ? '—' : ra.synth.toFixed(1) + ' dB'}` : '';
   }
 
   function rangeFor(z) {
@@ -1424,7 +1825,8 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
       for (const c of pointerCleanups) c();
       recorder.cancel();
       audio.close();
-      for (const v of [overview, zoom, zoom4, spec2, spec4]) v.dispose();
+      for (const v of [overview, zoom, zoom4, spec2, spec4, specAuto]) v.dispose();
+      tutorial.dispose();
       return { audio: audio.debugInfo(), recorder: { ...recorderCounters } };
     },
     debug() {
@@ -1442,12 +1844,23 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
         synthSpec: !!synthSpec,
         storage: { ...st.storage },
         cursors: [...st.cursors], pinned: st.pinned, range: st.range, fftSize: st.fftSize, synthLen: st.synthLen,
+        audioOwner: st.audioOwner,
+        auto: st.auto ? {
+          f0: st.auto.result.f0, f0Auto: st.auto.result.f0Auto, f0Source: st.auto.result.f0Source, status: st.auto.result.status,
+          amps: st.auto.result.amps ? [...st.auto.result.amps] : null,
+          problems: st.auto.result.problems.map((p) => p.code), warnings: st.auto.result.warnings.map((w) => w.code),
+          stats: { ...st.auto.result.stats }, recId: st.auto.recId, from: st.auto.from, to: st.auto.to,
+          stale: autoIsStale(), savedId: st.auto.savedId, sourceExpId: st.auto.sourceExpId,
+        } : null,
+        autoMsg: st.autoMsg,
+        tutorial: { open: tutorial.isOpen, step: tutorial.step },
       };
     },
     /** For automated checks: the samples of a recording, and a render of the saved recipe. */
     testHooks: {
       recordingSamples: (id) => Array.from(recById(id).samples),
       renderSaved: () => { const s = savedFor(st.work.id); const y = s && synthRender(s); return y && { sampleRate: y.sampleRate, samples: Array.from(y.samples) }; },
+      renderAuto: () => { const y = autoRender(); return y && { sampleRate: y.sampleRate, samples: Array.from(y.samples) }; },
       peakAt: (which, freq) => {
         const s = which === 'orig' ? origSpec : synthSpec;
         return s ? M.peakNear(s.rel.db, s.rel.binHz, freq, 3) : null;

@@ -96,7 +96,7 @@ check('Default mode is Manual frequencies; component table and plots present', d
 await btn('🗣 Vowel Lab: harmonic sliders').click();
 await wait(300);
 d = await dbg();
-check('Vowel Lab mode shows the five stages; manual table hidden', d.mode === 'vowel' && (await page.locator('.vl-stage').count()) === 5 && (await page.locator('table.comps:not(.vl-table)').count()) === 0);
+check('Vowel Lab mode shows the five stages plus the automatic section; manual table hidden', d.mode === 'vowel' && (await page.locator('.vl-stage').count()) === 6 && (await page.locator('.vl-stage[data-stage="auto"]').count()) === 1 && (await page.locator('table.comps:not(.vl-table)').count()) === 0);
 check('Starts from the neutral 1/n recipe (not a vowel preset), nothing saved', d.vowel.work.amps[0] === 1 && d.vowel.work.amps[1] === 0.5 && d.vowel.work.amps[3] === 0.25 && d.vowel.saved.length === 0 && d.vowel.dirty);
 check('Up to 48 harmonics; default 32', d.vowel.work.count === 32 && (await page.locator('.vl-row').count()) === 32);
 
