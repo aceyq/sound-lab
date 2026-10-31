@@ -185,7 +185,10 @@ export class VowelAudio {
     src.buffer = buf;
     const g = ctx.createGain();
     const peak = peakAbs(rec.samples, from, from + len);
-    const level = levelMatch && peak > 1e-6 ? OUTPUT_PEAK / peak : 1;
+    // levelMatch: true → OUTPUT_PEAK; a number → that peak (the Vowel filtering
+    // section matches the original to its filtered sound's peak).
+    const target = typeof levelMatch === 'number' ? levelMatch : OUTPUT_PEAK;
+    const level = levelMatch && peak > 1e-6 ? target / peak : 1;
     const dur = len / rec.sampleRate;
     // 10 ms fades only for listening, so a segment cut mid-wave does not click.
     const f = Math.min(0.01, dur / 4);

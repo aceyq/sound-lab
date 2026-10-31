@@ -16,6 +16,7 @@ import { VowelAudio } from './vowel-audio.js';
 import { OverviewView, ZoomWaveView, CompareSpectrumView } from './vowel-plots.js';
 import * as store from './vowel-store.js';
 import { createVowelTutorial } from './vowel-tutorial.js';
+import { createFilterSection } from './vowel-filter-section.js';
 
 const DURATIONS = [2, 3, 4];
 const REF_SUGGESTIONS = [[110, 'A2 · low voice'], [147, 'D3'], [196, 'G3'], [220, 'A3'], [262, 'C4 · middle C'], [330, 'E4'], [392, 'G4']];
@@ -29,7 +30,7 @@ const MIN_TAKE_SEC = 0.3;
  * opts: { help, micSection, stopOtherAudio(), logChange(text) }
  * Returns { element, frame(), unmount(), debug(), stopAudio(), playing }.
  */
-export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) {
+export function createVowelLab({ help, micSection, stopOtherAudio, logChange, getManualComponents = () => [] }) {
   const mic = micSection.mic;
   const recorder = new VowelRecorder();
   const audio = new VowelAudio({ volume: 0.5, onChange: () => { updateTransport(); dirtyAll(); } });
@@ -85,7 +86,8 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
   // ───────────── shared building blocks ─────────────
   const el = {};
   // Click-through tutorial popup. It only explains; it changes nothing.
-  const tutorial = createVowelTutorial({ el, hasRecording: () => !!workRec() });
+  const tutorial = createVowelTutorial({ el, hasRecording: () => !!workRec(), onOpen: () => { if (filterSection) filterSection.tour.close(); } });
+  let filterSection = null; // Vowel filtering (assignment 4), created below
   const stage = (num, title, sub, ...children) => h('section', { class: 'card vl-stage', 'data-stage': num, 'aria-label': `Stage ${num}: ${title}` },
     h('div', { class: 'vl-stage-head' }, h('span', { class: 'vl-num' }, String(num)), h('div', {}, h('h2', {}, title), h('p', { class: 'muted vl-sub' }, sub))),
     ...children);
@@ -465,17 +467,36 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
     el.expTable,
   );
 
+  // ───────────── vowel filtering (assignment 4) ─────────────
+  // Uses the recordings above, but keeps its own experiments and audio; it
+  // never edits the sliders or the manual and automatic experiments.
+  filterSection = createFilterSection({
+    help,
+    getRecordings: () => st.recordings,
+    recById,
+    openExperiment: () => (st.work ? { recordingId: st.work.recordingId, segment: st.work.segment, vowel: st.work.vowel } : null),
+    stopOtherAudio: () => { stopOtherAudio(); stopAudio(); },
+    isRecording: () => st.rec.state !== 'idle',
+    logChange,
+    download: (name, blob) => download(name, blob),
+    getManualComponents,
+    goToRecording: () => { el.recordBtn.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.recordBtn.focus({ preventScroll: true }); },
+  });
+  filterSection.setTourHook(() => tutorial.close());
+  el.goFilter = h('button', { class: 'btn vf-go', onclick: () => scrollToFilter() }, '🎚 Go to Vowel filtering');
+
   const element = h('section', { class: 'vowel-lab', id: 'vowel-lab', 'aria-label': 'Vowel Lab' },
     h('div', { class: 'card vl-intro' },
       h('div', { class: 'vl-intro-head' },
         h('h2', {}, '🗣 Vowel Lab: recreate a sung vowel with harmonic sliders'),
-        tutorial.button),
+        h('span', { class: 'row gap wrap' }, el.goFilter, tutorial.button)),
       h('p', { class: 'muted' }, 'Record → inspect → set the fundamental → adjust harmonics → compare → save → repeat at another pitch. New here? Press “How to use Vowel Lab” for a guided tour of the page; it only points things out and changes nothing.'),
       guide),
     bar,
     stage1,
     stage2,
     stageAuto,
+    filterSection.element,
     h('div', { class: 'vl-shape-grid' }, stage3, stage4),
     stage5,
   );
@@ -762,6 +783,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
     if (st.rec.state !== 'idle') return;
     stopAudio();
     stopOtherAudio();
+    filterSection.stopAudio();
     st.rec = { state: 'starting', captured: 0, message: '' };
     el.recMsg.replaceChildren();
     updateRecUi();
@@ -1103,6 +1125,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
   function guardPlay() {
     if (st.rec.state !== 'idle') return false;
     stopOtherAudio();
+    filterSection.stopAudio();
     return true;
   }
 
@@ -1623,6 +1646,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
     if (!st.recordings.length) {
       el.recList.replaceChildren(h('p', { class: 'muted' }, 'No recordings yet.'));
       updateTransport();
+      filterSection.recordingsChanged();
       return;
     }
     el.recList.replaceChildren(...[...st.recordings].reverse().map((rec) => {
@@ -1646,6 +1670,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
       );
     }));
     updateTransport();
+    filterSection.recordingsChanged();
   }
 
   function renderExpTable() {
@@ -1724,6 +1749,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
   let lastMicStatus = null;
   let lastPlayhead = null;
   function frame() {
+    filterSection.frame();
     if (mic.status !== lastMicStatus) { lastMicStatus = mic.status; updateMicLine(); }
     const ph = audio.playhead();
     if (ph !== lastPlayhead) { lastPlayhead = ph; canvasesDirty = true; }
@@ -1779,6 +1805,10 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
     return `${r.pinned ? 'Pinned' : 'Cursor'} ${fmtHz(Math.round(r.freq))} (≈ harmonic ${(r.freq / st.work.f0).toFixed(2)}) · original ${f(r.orig)} · synthesized ${f(r.synth)}`;
   }
 
+  function scrollToFilter() {
+    filterSection.element.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+  }
+
   // ───────────── init ─────────────
   let alive = true;
   const loaded = store.loadExperiments();
@@ -1810,20 +1840,30 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
     origSpec = null;
     renderAll();
   });
-  const onPageHide = () => { recorder.cancel(); audio.stop(); };
+  // The sticky experiment bar belongs to stages 1–5; while Vowel filtering
+  // fills the middle of the screen it scrolls away instead of covering it
+  // (on a phone it would hide most of the filter chart).
+  const filterObserver = typeof IntersectionObserver === 'function'
+    ? new IntersectionObserver((entries) => { for (const e of entries) element.classList.toggle('vf-in-view', e.isIntersecting); }, { rootMargin: '-40% 0px -40% 0px' })
+    : null;
+  if (filterObserver) filterObserver.observe(filterSection.element);
+  const onPageHide = () => { recorder.cancel(); audio.stop(); filterSection.stopAudio(); };
   window.addEventListener('pagehide', onPageHide);
 
   return {
     element,
     frame,
-    get playing() { return audio.playing; },
-    stopAudio() { stopAudio(); },
+    get playing() { return audio.playing || filterSection.playing; },
+    stopAudio() { stopAudio(); filterSection.stopAudio(); },
+    scrollToFilter() { scrollToFilter(); },
     unmount() {
       alive = false;
       window.removeEventListener('pagehide', onPageHide);
       for (const c of pointerCleanups) c();
       recorder.cancel();
       audio.close();
+      filterSection.unmount();
+      if (filterObserver) filterObserver.disconnect();
       for (const v of [overview, zoom, zoom4, spec2, spec4, specAuto]) v.dispose();
       tutorial.dispose();
       return { audio: audio.debugInfo(), recorder: { ...recorderCounters } };
@@ -1853,6 +1893,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
         } : null,
         autoMsg: st.autoMsg,
         tutorial: { open: tutorial.isOpen, step: tutorial.step, stepId: tutorial.stepId },
+        filter: filterSection.debug(),
       };
     },
     /** For automated checks: the samples of a recording, and a render of the saved recipe. */
@@ -1860,6 +1901,7 @@ export function createVowelLab({ help, micSection, stopOtherAudio, logChange }) 
       recordingSamples: (id) => Array.from(recById(id).samples),
       renderSaved: () => { const s = savedFor(st.work.id); const y = s && synthRender(s); return y && { sampleRate: y.sampleRate, samples: Array.from(y.samples) }; },
       tourTargetRect: () => tutorial.targetRect(),
+      filter: filterSection.testHooks,
       renderAuto: () => { const y = autoRender(); return y && { sampleRate: y.sampleRate, samples: Array.from(y.samples) }; },
       peakAt: (which, freq) => {
         const s = which === 'orig' ? origSpec : synthSpec;

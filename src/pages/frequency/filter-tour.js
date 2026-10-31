@@ -1,0 +1,43 @@
+// "Tour: vowel filtering": the guided tour for the Vowel filtering section,
+// shown with the same spotlight tour as Vowel Lab (vowel-tutorial.js). Each
+// `pick` names an entry of the section's element map (`fel` in
+// vowel-filter-section.js). Steps whose controls belong to another workflow
+// fall back to that workflow's tab and say so, so the tour works with no
+// recordings at all. The tour only scrolls and highlights; it never plays,
+// records, saves or changes anything.
+export const FILTER_TOUR_STEPS = [
+  { id: 'idea', pick: 'lead', title: 'Source + filter',
+    body: 'The source has every harmonic at the same strength. The filter then turns whole frequency regions down, and that balance makes it sound like a vowel.' },
+  { id: 'workflows', pick: 'workflowTabs', title: 'Three ways to work',
+    body: 'Explore vowel examples, filter your own frequencies, or match a recording. Only the third uses a recording.' },
+  { id: 'source', pick: 'sourceChoice', title: 'Choose the source',
+    body: 'Equal-strength harmonics: f0 and every harmonic at amplitude 1. My own frequencies: any components you type, kept exactly as you set them.' },
+  { id: 'f0', pick: ['f0Box', 'startBtn'], title: 'Fundamental and all-maximum start',
+    body: 'Type f0, for example 200 Hz, and press Start to hear the buzzy all-maximum source. Shaping the filter never changes f0.',
+    missing: 'This appears with the “Equal-strength harmonics” source (workflows 1 and 3).', fallback: ['tabExplore'] },
+  { id: 'custom', pick: 'customBox', title: 'Your own components',
+    body: 'Add, edit or remove frequency/amplitude rows, generate harmonics, or copy your Manual frequencies setup. The filter only changes their strengths.',
+    missing: 'Choose workflow 2, “Filter my own frequencies”, to see the component table.', fallback: ['tabCustom'] },
+  { id: 'examples', pick: 'exampleBox', title: 'Vowel examples',
+    body: 'Click Aa, Eh, Ee, Oh or Oo to load an approximate filter, then ▶ Play. Only the filter changes; your source stays as it is.' },
+  { id: 'toggle', pick: ['filterToggle', 'resetBtn'], title: 'Filter on, bypass, reset',
+    body: 'Bypass skips the filter but keeps its settings, at the same output level. Reset to flat lets everything through again.' },
+  { id: 'drag', pick: 'filterBox', title: 'Drag the filter points',
+    body: 'Left/right picks a region, down reduces it. The green line is the filter actually applied; purple dots are the components it acts on.' },
+  { id: 'table', pick: 'bandTable', title: 'Or type the values',
+    body: 'Each point has a centre (Hz), a cut (dB, 0 = none) and a width (Q). Arrow keys on the chart move the selected point too.' },
+  { id: 'spectra', pick: 'specBox', title: 'Compare the spectra',
+    body: 'Cyan is the filtered source, grey dashed the unfiltered one, orange your recording in workflow 3. The peaks stay put; only their heights change.' },
+  { id: 'recording', pick: ['recSelect', 'overviewBox'], title: 'Match a recording (optional)',
+    body: 'In workflow 3, pick a take and drag across its steady middle. Record or import takes in stage 1 above.',
+    missing: 'Choose workflow 3, “Match a recording”, to use a recording. Workflows 1 and 2 need none.', fallback: ['tabRecording'] },
+  { id: 'match', pick: ['matchBtn', 'fitBox'], title: 'Match filter to recording',
+    body: 'Fits the 8 filter points to the section’s harmonic strengths. The source stays at amplitude 1; the result is a new, editable experiment.',
+    missing: 'Available in workflow 3 with a recording. It fits the equal-strength harmonic source only.', fallback: ['tabRecording'] },
+  { id: 'listen', pick: ['playDry', 'playWet', 'stopBtn'], title: 'Listen and compare',
+    body: 'Play the unfiltered and the filtered source; in workflow 3 also the original and Original → Filtered. The label shows what is playing.' },
+  { id: 'save', pick: ['saveBtn', 'dlWav', 'dlJson'], title: 'Save and download',
+    body: 'Saves the workflow, source, filter and notes separately from your other experiments. No recording is needed to save or export.' },
+  { id: 'wrapup', pick: null, title: 'That’s the tour',
+    body: 'Formants are broad regions, not single harmonics. A filter can only reshape components that are present, so sparse sources may not sound like vowels.' },
+];

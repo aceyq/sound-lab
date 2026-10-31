@@ -1,6 +1,6 @@
 # Vowel Morph: capstone tasks 3 and 4
 
-Vowel Morph is a third app in the Sound & Signals Lab, next to Frequency Playground and Motion Score. It has its own route (`#/vowel-morph`) and its own **3. Vowel Morph** button in the top navigation bar. Everything is local. Nothing has been committed, pushed or published.
+Vowel Morph is a third app in the Sound & Signals Lab, next to Frequency Playground and Motion Score. It has its own route (`#/vowel-morph`) and its own **3. Vowel Morph** button in the top navigation bar. It is published on GitHub Pages at https://aceyq.github.io/sound-lab/#/vowel-morph.
 
 ## 1. What was completed
 

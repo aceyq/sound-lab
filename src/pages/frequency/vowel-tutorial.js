@@ -77,11 +77,11 @@ const EDGE = 10; // keep clear of the window edge
 
 /**
  * Creates the tour. `el` is the Vowel Lab's element map; `hasRecording()`
- * says whether the open experiment has a recording.
+ * says whether the open experiment has a recording. `steps` defaults to the
+ * Vowel Lab tour; the Vowel filtering section passes its own (filter-tour.js).
  * Returns { button, start(at), close(), get isOpen(), get step(), dispose(), resolve(i) }.
  */
-export function createVowelTutorial({ el = {}, root = document, hasRecording = () => true, label = '❓ How to use Vowel Lab' } = {}) {
-  const steps = TUTORIAL_STEPS;
+export function createVowelTutorial({ el = {}, root = document, hasRecording = () => true, label = '❓ How to use Vowel Lab', steps = TUTORIAL_STEPS, idPrefix = 'vtour', onOpen = () => {} } = {}) {
   let i = -1;
   let opener = null;
   let raf = 0;
@@ -90,13 +90,13 @@ export function createVowelTutorial({ el = {}, root = document, hasRecording = (
   const hole = h('div', { class: 'tour-hole vtour-hole', 'aria-hidden': 'true' });
   const shade = h('div', { class: 'tour-shade', 'aria-hidden': 'true' });
   const count = h('div', { class: 'tour-count', 'aria-live': 'polite' });
-  const title = h('div', { class: 'tour-title', id: 'vtour-title' });
-  const body = h('div', { class: 'tour-body', id: 'vtour-body' });
+  const title = h('div', { class: 'tour-title', id: idPrefix + '-title' });
+  const body = h('div', { class: 'tour-body', id: idPrefix + '-body' });
   const note = h('div', { class: 'vtour-note' });
   const back = h('button', { class: 'btn small', type: 'button', onclick: () => go(i - 1) }, '← Back');
   const next = h('button', { class: 'btn small primary', type: 'button', onclick: () => go(i + 1) }, 'Next →');
   const skip = h('button', { class: 'btn small vtour-skip', type: 'button', 'aria-label': 'Close the tour', onclick: () => close() }, '✕ Close');
-  const pop = h('div', { class: 'tour-pop vtour-pop', role: 'dialog', 'aria-labelledby': 'vtour-title', 'aria-describedby': 'vtour-body' },
+  const pop = h('div', { class: 'tour-pop vtour-pop', role: 'dialog', 'aria-labelledby': idPrefix + '-title', 'aria-describedby': idPrefix + '-body' },
     h('div', { class: 'vtour-head' }, count, skip), title, body, note,
     h('div', { class: 'tour-buttons' }, back, next));
 
@@ -164,6 +164,7 @@ export function createVowelTutorial({ el = {}, root = document, hasRecording = (
   function start(at = 0) {
     const k = typeof at === 'string' ? Math.max(0, steps.findIndex((s) => s.id === at)) : at;
     if (i < 0) {
+      onOpen();
       opener = document.activeElement;
       document.body.append(shade, hole, pop);
       document.body.classList.add('vtour-on');

@@ -32,6 +32,30 @@ export function saveExperiments(list) {
   }
 }
 
+// Vowel filtering experiments (assignment 4) have their own key, so saving
+// one can never overwrite or reshape the manual and automatic experiments.
+const FILTER_KEY = 'frequencyPlayground.vowelLab.filterExperiments.v1';
+
+export function loadFilterExperiments() {
+  try {
+    const raw = localStorage.getItem(FILTER_KEY);
+    if (!raw) return { ok: true, list: [] };
+    const list = JSON.parse(raw);
+    return { ok: true, list: Array.isArray(list) ? list : [] };
+  } catch (e) {
+    return { ok: false, list: [], error: String(e && e.message || e) };
+  }
+}
+
+export function saveFilterExperiments(list) {
+  try {
+    localStorage.setItem(FILTER_KEY, JSON.stringify(list));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
 let dbPromise = null;
 function openDb() {
   if (dbPromise) return dbPromise;

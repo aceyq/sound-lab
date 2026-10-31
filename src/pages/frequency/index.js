@@ -304,6 +304,8 @@ export function mount(root, params = new URLSearchParams()) {
     help, micSection,
     stopOtherAudio: () => stop(),
     logChange: (text, key) => logChange(text, key),
+    // Vowel filtering can copy (never change) the Manual frequencies table.
+    getManualComponents: () => st.comps.map((c) => ({ freq: c.freq, amp: c.amp, on: c.enabled })),
   });
 
   // Two modes: the original arbitrary-frequency table, and the Vowel Lab.
@@ -312,7 +314,8 @@ export function mount(root, params = new URLSearchParams()) {
   const modeBar = h('nav', { class: 'mode-bar', 'aria-label': 'Frequency Playground mode' },
     h('span', { class: 'ctl-label' }, 'Mode'),
     h('div', { class: 'seg-group', role: 'group' }, el.modeManual, el.modeVowel),
-    h('span', { class: 'help inline' }, 'Manual: type any frequencies. Vowel Lab: record a vowel and rebuild it from harmonics n × f0.'));
+    el.modeFilter = h('button', { class: 'btn vf-go', onclick: () => { setMode('vowel'); requestAnimationFrame(() => vowelLab.scrollToFilter()); } }, '🎚 Vowel filtering'),
+    h('span', { class: 'help inline' }, 'Manual: type any frequencies. Vowel Lab: record a vowel and rebuild it from harmonics n × f0. Vowel filtering (inside Vowel Lab): all harmonics at maximum, shaped by a filter.'));
 
   el.backdrop = h('div', { class: 'backdrop', onclick: () => collapseAll() });
   const fpGrid = h('div', { class: 'fp-grid' },

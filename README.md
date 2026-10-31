@@ -130,6 +130,10 @@ Design choices: up to **48 harmonics** (default 32): at f0 ≈ 100 Hz that reach
 
 Manual checks that need real hardware and ears: recording your own voice; whether the reference tone is comfortable on your speakers; whether the synthesized vowel is recognizable; Safari/Firefox recording (the automated checks use Chromium only).
 
+## Frequency Playground: Vowel filtering (assignment 4)
+
+Inside Vowel Lab (or via **🎚 Vowel filtering** in the Mode bar): start from the fundamental and every harmonic at amplitude 1, then shape vowels with a real filter (8 draggable cut-only Web Audio peaking filters). Load approximate A/E/I/O/U examples, or press **Match filter to recording** to fit the filter to a recorded vowel. Filter experiments are saved separately from the other experiments. See [FILTER_VOWEL_UPDATE.md](FILTER_VOWEL_UPDATE.md) for the approach, test results, instructions and sources; `node scripts/verify-filter.mjs` runs the browser checks.
+
 ## Frequency Playground known limitations
 
 - **Phase alignment is approximate** at the level of single audio samples. Browsers schedule start times to roughly one sample (about 0.02 ms at 48 kHz). For high frequencies that can shift a component's phase slightly, which changes the exact waveform shape a little but not the spectrum peaks. The waveform plot is a calculation from the table. It is not a live oscilloscope trace of the speaker output.
