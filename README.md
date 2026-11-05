@@ -12,6 +12,10 @@ Every row of the table is one term with its own frequency fáµ¢ and amplitude Aáµ
 
 **Project 2, Motion Score:** a phone's motion and orientation sensors control an additive-synthesis instrument on the laptop. In the default Tilt instrument mapping, forward/back tilt sets the fundamental and sideways lean sets harmonic richness independently; the original Movement intensity mapping is still available. Sharp movements trigger notes in Accents mode. The phone opens a lightweight Controller page (via QR code) and streams sensor values to the laptop over WebRTC (PeerJS). See [Motion Score](#motion-score-project-2) below and `PRESENTATION_NOTES.md`.
 
+## AI use
+
+This project was built with substantial help from Claude (Anthropic), used as Claude Code. I, Acelynn (Ace) Qiao, wrote the requirements for each feature from Professor Minces's assignments, made the scope and design decisions in those prompts, tested features on my own hardware and by listening where recorded, made the demo videos, and presented the work. Claude wrote the application code, tests, verification scripts and most of the documentation, ran the automated checks, and committed and published most updates. Every commit shows my Git identity, including commits Claude made on my Mac. [AI_USE.md](AI_USE.md) has my verbatim prompts, what Claude implemented, my own testing kept separate from Claude's automated checks, who ran each commit, and a list of records that are still missing.
+
 ## Run it locally
 
 You need Node.js 18 or newer.
