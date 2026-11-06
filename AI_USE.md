@@ -3057,3 +3057,84 @@ These records were not in any source I could check, so this file does not fill t
 4. **Automatic vowel synthesis, tutorial and guided tour (Oct 25–27):** any record of my testing or listening.
 5. **Vowel filtering (Oct 31):** listening tests of Eh, Oh, the custom-frequency workflow and recording matching; the exact Terminal commands behind `b4ca719`; and any check of its GitHub Pages deployment.
 6. **Vowel Morph (Oct 31):** a walkthrough of the live page in a browser.
+
+## Vowel interpolation check, noise and fricatives (November 5–6, 2026)
+
+**Tool:** Claude (Claude Code, running in `~/Desktop/frequency-playground` on my Mac through a Claude project thread). ChatGPT helped me draft the prompt below.
+
+### What I asked for
+
+Prompt (verbatim, sent November 6, 2026 UTC; drafted with help from ChatGPT):
+
+<details>
+<summary>Full prompt</summary>
+
+> Complete this week’s DSC 180A assignment in the existing `~/Desktop/frequency-playground` checkout for `aceyq/sound-lab`. Start by checking the branch, remote, working tree, and current Vowel Morph and Frequency Playground implementations. I think the vowel interpolation may already work, so verify it before changing it. Preserve unrelated changes and any existing uncommitted work in `AI_USE.md` or `README.md`.
+> 1. Verify or fix vowel reconstruction and interpolation
+>
+> * In the 2D vowel space, I should be able to record a sustained vowel with my microphone, reconstruct it digitally as a fundamental frequency and a set of harmonic amplitudes, and place that reconstruction as a visible dot at a position I choose. Reuse the existing recording and analysis workflow where possible. Clicking a recorded dot should play its synthesized reconstruction.
+> * Clicking elsewhere in the space should produce one synthesized sound. Compute its fundamental frequency and each harmonic amplitude using normalized weights based on distance to the recorded dots. Reuse the current weighting method if it behaves correctly. A click exactly on a dot should reproduce that dot’s parameters. Handle zero or one recorded dot cleanly.
+> * Check the 1D slider separately. The left and right endpoints should reproduce their respective vowel parameters. Between them, linearly interpolate the fundamental frequency and each corresponding harmonic amplitude. The midpoint should be a 50/50 parameter blend played by one synthesizer. Do not mix, crossfade, or simultaneously play two endpoint audio signals. Verify this by inspecting the playback path as well as testing the interpolation math.
+>
+> 2. Add noise and explore fricatives in Frequency Playground
+>
+> * Add a controllable noise source to the Frequency Playground filter workflow from last week. Let me hear filtered noise on its own and blend it with the harmonic source when useful. Reuse the existing filter controls and waveform/spectrum views so I can hear and see what changes. Preserve the current vowel workflow.
+> * Give me a simple manual workflow to try recreating “shh,” “fff,” “jjj,” and “sss” by adjusting the filter and the noise level. Include a way to try a voiced harmonic component alongside the noise for the sound I’m calling “jjj.” Treat the settings as starting points I can adjust by ear.
+> * Make one lightweight automation attempt. Prefer reusing the microphone recorder and spectrum analysis to estimate the broad spectral shape of a sustained fricative, then use that estimate to suggest initial filter settings for the noise source. If fitting the existing filter controls is impractical, implement editable starting presets and explain which settings are preset versus estimated from a recording. Keep the experiment small and describe its limits.
+>
+> 3. Test, document, and publish
+>
+> * Run the existing tests and build. Add focused checks for the 1D endpoints and midpoint, exact and equidistant 2D clicks, and any new noise or filter behavior that can be tested reliably. Report the actual commands, counts, and results. If you can open the app, check the controls there too. Give me a short checklist for the microphone recordings, dot placement, and listening comparisons that I need to do myself. Do not count those as completed until I report back.
+> * Append a dated section for this week to the existing `AI_USE.md`. Quote this entire prompt verbatim and note that ChatGPT helped draft it. Summarize what I requested, what you verified in the existing implementation, what you changed, the checks you actually ran, and the manual checks still pending. Preserve the earlier disclosure entries.
+> * Once the tests and build pass, commit and push this week’s changes and its `AI_USE.md` entry to `main`. If the earlier AI-use and README edits are still uncommitted, keep those together in a separate documentation commit if you can safely separate them. Review what is staged before committing and exclude unrelated edits and personal recordings. If the push is blocked, report the blocker and preserve the local changes.
+> * Send me the commit links, the `AI_USE.md` link, and the short manual checklist.
+
+</details>
+
+In short: check and fix vowel reconstruction and interpolation in Vowel Morph, add a noise source and a fricative workflow to Frequency Playground with one small automated estimate, then test, document and publish.
+
+### What Claude verified in the existing implementation
+
+- **Repository:** branch `main`, tracking `origin/main`, remote `https://github.com/aceyq/sound-lab.git`. The working tree was clean, so the earlier `AI_USE.md` and README edits were already committed (`cd61e6f`) and no separate documentation commit was needed.
+- **2D workflow:** recording, analysis into f0 and 48 harmonic amplitudes, placing a dot, and playing a dot's synthesized reconstruction already worked. The inverse-distance weights already behaved correctly (normalized, exact on a dot, zero and one dot handled), so they were kept.
+- **Interpolation rule did not match this assignment.** Both views blended f0 as a geometric mean (semitones) and harmonic amplitudes in decibels with a −60 dB floor. Halfway between 200 Hz and 300 Hz gave 244.9 Hz, not 250 Hz. The prompt asks for linear interpolation.
+- **Playback path:** Claude read `morph-audio.js` and `index.js`. Slider and square sounds go through one bank of 48 sine oscillators whose targets change, and that path uses no recording buffer. A recording plays only from an explicit Original control or a dot tap in Original mode. Switching between a recording and the synthesizer stops the first with a 40 ms fade, so they overlap only during that fade.
+
+### What Claude changed
+
+- **Vowel Morph:** `blendParams` is now a plain weighted average of f0 and of each harmonic amplitude, in both 1D and 2D. Endpoints and dots still return exact values. The on-page formula, tour and `VOWEL_MORPH_UPDATE.md` were updated, including the 25 + 119 test split that an earlier entry flagged.
+- **Noise source:** a Noise source panel in Vowel filtering, with noise level, harmonic level, "Harmonics skip the filter" and "Filtered noise only". Noise is off by default. It uses the existing filter and spectrum views.
+- **Fricatives:** a fourth workflow, "Noise and fricatives", with editable starting points for shh, fff, jjj and sss. Claude read "jjj" as the voiced sound in "measure", which is an assumption for me to confirm.
+- **Automation attempt:** "Estimate filter from recording" reduces a section's averaged spectrum to third-octave levels and fits the existing 8 filter points. Only the filter is estimated. `NOISE_FRICATIVE_UPDATE.md` lists what is preset versus estimated, and the limits.
+- **Tests and scripts:** new `test/noise-fricative.test.js` and `scripts/verify-noise.mjs`, more checks in `test/vowel-morph.test.js` and `scripts/verify-vowel-morph.mjs`, and a `--disable-audio-output` flag in the browser scripts. The flag was needed because the Mac's audio clock was not advancing for headless Chromium during this session.
+
+### Automated checks (run by Claude, November 5, 2026 Pacific)
+
+These use synthetic signals, a fake microphone and the app's state. None of them involve listening.
+
+| Command | Result |
+|---|---|
+| `npm test` | 157/157 pass (27 in `test/vowel-morph.test.js`, 11 in `test/noise-fricative.test.js`) |
+| `npm run build` | Succeeded |
+| `node scripts/verify-vowel-morph.mjs http://localhost:5181/` | 54/54 pass |
+| `node scripts/verify-noise.mjs http://localhost:5181/` | 22/22 pass |
+| `node scripts/verify-filter.mjs http://localhost:5181/` | 57/57 pass |
+| `node scripts/verify-filter-workflows.mjs http://localhost:5181/` | 31/31 pass |
+| `verify`, `verify-motion`, `verify-mic`, `verify-vowel`, `verify-auto-vowel`, `verify-tutorial` (same URL) | 36/36, 67/67, 45/45, 49/49, 26/26, 24/24 pass |
+
+Notes on these runs:
+
+- `verify-filter-workflows` first failed 30/31, because the fricative buttons shared a CSS class with the vowel buttons. Claude renamed the class and re-ran `verify-filter`, `verify-filter-workflows`, `verify-noise`, the build and `npm test`. The other browser scripts in the table ran just before that rename and were not repeated.
+- One `verify-motion` run was stopped by Claude after 59 passing checks because it looked stuck. A repeat run passed 67/67.
+- The controls were exercised in headless Chromium by these scripts. Claude did not use the app by hand or listen to it.
+
+### Manual checks still pending
+
+None of these has been done yet. I will add results when I have them.
+
+1. Record a sustained vowel in the 2D view with my real microphone and place it as a dot.
+2. Click recorded dots and points between them, and judge whether each is one sound and how it compares with the original.
+3. Listen to the slider's endpoints and midpoint with the new linear rule.
+4. Try shh, fff, sss and jjj by ear, and adjust the filter and levels.
+5. Record a real sustained fricative and compare the estimate with Original → Filtered.
+6. Confirm that "jjj" means the sound I intended.

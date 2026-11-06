@@ -66,7 +66,7 @@ const INSTRUMENT = () => {
 const errors = [];
 const browser = await playwright.chromium.launch({
   executablePath: process.env.CHROME_PATH || undefined,
-  args: ['--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${wavPath}`, '--autoplay-policy=no-user-gesture-required', '--use-fake-ui-for-media-stream'],
+  args: ['--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${wavPath}`, '--autoplay-policy=no-user-gesture-required', '--disable-audio-output', '--use-fake-ui-for-media-stream'],
 });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, permissions: ['microphone'], acceptDownloads: true });
 const page = await context.newPage();

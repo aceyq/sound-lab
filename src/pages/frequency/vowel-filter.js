@@ -141,6 +141,48 @@ function renderComponentSum(components, sampleRate, n, gain) {
   return acc;
 }
 
+// ───────────── noise and the source mix ─────────────
+// The source can also include white noise, for fricatives. mix = { voiced,
+// noise, voicedDirect }:
+//   voiced        0…1, scales the sine components (1 = exactly as before)
+//   noise         0…1, level of the white noise (0 = none, the default)
+//   voicedDirect  true: the sines go around the filter and only the noise is
+//                 filtered, like voicing beside a fricative's hiss
+// The noise is a fixed pseudo-random loop, so the live sound, the spectra and
+// the WAV all use the same samples. NOISE_PEAK keeps the sum of full noise
+// and full sines (peak SAFE_PEAK) below full scale.
+
+export const NOISE_PEAK = 0.25;
+export const NOISE_SEC = 4; // length of the noise loop
+export const DEFAULT_MIX = { voiced: 1, noise: 0, voicedDirect: false };
+
+export function cleanMix(m) {
+  const lvl = (v, d) => (v != null && Number.isFinite(Number(v)) ? round(Math.max(0, Math.min(1, Number(v))), 3) : d);
+  return { voiced: lvl(m && m.voiced, 1), noise: lvl(m && m.noise, 0), voicedDirect: !!(m && m.voicedDirect) };
+}
+
+const noiseCache = new Map();
+/** The noise loop at this rate: uniform white noise in −1…1 (mulberry32). */
+export function noiseLoop(sampleRate) {
+  if (noiseCache.has(sampleRate)) return noiseCache.get(sampleRate);
+  const out = new Float32Array(Math.round(NOISE_SEC * sampleRate));
+  let a = 0x9e3779b9;
+  for (let i = 0; i < out.length; i++) {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    out[i] = (((t ^ (t >>> 14)) >>> 0) / 4294967296) * 2 - 1;
+  }
+  noiseCache.set(sampleRate, out);
+  return out;
+}
+
+/** True when the source would make any sound at all. */
+export function hasSound(components, mix, sampleRate) {
+  const m = cleanMix(mix);
+  return m.noise > 0 || (m.voiced > 0 && activeComponents(components, sampleRate).length > 0);
+}
+
 // ───────────── the filter ─────────────
 
 export function defaultBands() {
@@ -242,27 +284,53 @@ export function renderSource({ f0, count, components = null, sampleRate, duratio
   return out;
 }
 
+/** The faded noise at its mix level (no sines), as played. */
+function renderNoise({ level, sampleRate, duration, fadeSec = M.FADE_SEC }) {
+  const n = Math.max(1, Math.round(duration * sampleRate));
+  const loop = noiseLoop(sampleRate);
+  const fadeN = Math.min(Math.floor(n / 2), Math.round(fadeSec * sampleRate));
+  const out = new Float64Array(n);
+  const a = level * NOISE_PEAK;
+  for (let i = 0; i < n; i++) {
+    let g = 1;
+    if (i < fadeN) g = i / fadeN;
+    else if (i >= n - fadeN) g = (n - 1 - i) / fadeN;
+    out[i] = a * loop[i % loop.length] * g;
+  }
+  return out;
+}
+
 /**
  * What playback and the WAV export produce: the faded source, then
  * TAIL_SEC of silence so the filter can ring out, through the cascade
  * (or around it when `enabled` is false). The filter starts at rest, like
- * the live BiquadFilterNodes. Returns a Float32Array.
+ * the live BiquadFilterNodes. `mix` adds noise and scales the sines (see
+ * cleanMix); makeup applies to the filtered path only. Returns a Float32Array.
  */
-export function renderFiltered({ f0, count, components = null, bands, enabled = true, sampleRate, duration, fadeSec = M.FADE_SEC, tailSec = TAIL_SEC, makeup = 1 }) {
+export function renderFiltered({ f0, count, components = null, bands, enabled = true, sampleRate, duration, fadeSec = M.FADE_SEC, tailSec = TAIL_SEC, makeup = 1, mix = DEFAULT_MIX }) {
+  const m = cleanMix(mix);
   const src = renderSource({ f0, count, components, sampleRate, duration, fadeSec });
-  const x = new Float64Array(src.length + Math.round(tailSec * sampleRate));
-  x.set(src);
-  if (!enabled) return Float32Array.from(x);
-  const y = applyFilter(x, bands, sampleRate);
+  const total = src.length + Math.round(tailSec * sampleRate);
+  const noise = m.noise > 0 ? renderNoise({ level: m.noise, sampleRate, duration, fadeSec }) : null;
+  const toFilter = new Float64Array(total);
+  const direct = new Float64Array(total);
+  const voicedInto = enabled && m.voicedDirect ? direct : toFilter;
+  for (let i = 0; i < src.length; i++) {
+    voicedInto[i] = m.voiced * src[i];
+    if (noise) toFilter[i] += noise[i];
+  }
+  if (!enabled) return Float32Array.from(toFilter);
+  const y = applyFilter(toFilter, bands, sampleRate);
   if (makeup !== 1) for (let i = 0; i < y.length; i++) y[i] *= makeup;
+  for (let i = 0; i < y.length; i++) y[i] += direct[i];
   return Float32Array.from(y);
 }
 
 /** Steady part only (for spectra): renders extra, drops the start-up transient. */
-export function renderSteady({ f0, count, components = null, bands, enabled = true, sampleRate, length }) {
+export function renderSteady({ f0, count, components = null, bands, enabled = true, sampleRate, length, mix = DEFAULT_MIX }) {
   const pre = Math.round(0.1 * sampleRate);
   const total = (pre + length) / sampleRate;
-  const y = renderFiltered({ f0, count, components, bands, enabled, sampleRate, duration: total, fadeSec: 0, tailSec: 0 });
+  const y = renderFiltered({ f0, count, components, bands, enabled, sampleRate, duration: total, fadeSec: 0, tailSec: 0, mix });
   return y.subarray(pre, pre + length);
 }
 
@@ -275,10 +343,10 @@ export const MAKEUP_MAX_DB = 40;
  * its harmonics, and it hides how much the filter removed, so the page labels
  * it whenever it is on.
  */
-export function makeupGain(f0, count, bands, sampleRate, components = null) {
+export function makeupGain(f0, count, bands, sampleRate, components = null, mix = DEFAULT_MIX) {
   const len = Math.round(0.25 * sampleRate);
-  const dry = peakOf(renderSteady({ f0, count, components, bands, enabled: false, sampleRate, length: len }));
-  const wet = peakOf(renderSteady({ f0, count, components, bands, enabled: true, sampleRate, length: len }));
+  const dry = peakOf(renderSteady({ f0, count, components, bands, enabled: false, sampleRate, length: len, mix }));
+  const wet = peakOf(renderSteady({ f0, count, components, bands, enabled: true, sampleRate, length: len, mix }));
   if (!(wet > 1e-9)) return 1;
   return Math.min(10 ** (MAKEUP_MAX_DB / 20), Math.max(1, dry / wet));
 }
@@ -583,18 +651,111 @@ function dot(a, b) {
   return s;
 }
 
+// ───────────── fricatives ─────────────
+// Editable starting points for sustained fricatives, made from white noise
+// and this same cut-only filter. Each `shape` is a hand-chosen broad target
+// (Hz, dB) fitted with fitFilter; none is measured from a voice. They follow
+// the general pattern in the phonetics literature (Stevens 1998; Jongman,
+// Wayland & Wong 2000): "sss" has its energy highest, "shh" lower, "fff" is
+// weak and flat. "jjj" is read here as the voiced sound in "measure": the
+// "shh" shape plus low harmonics that go around the filter.
+export const FRICATIVES = [
+  { id: 'shh', name: 'shh', ipa: 'ʃ', word: 'shoe', mix: { voiced: 0, noise: 0.9, voicedDirect: false },
+    shape: [[150, -38], [800, -36], [1500, -22], [2200, -6], [3000, 0], [4200, -3], [6000, -12], [9000, -24]] },
+  { id: 'fff', name: 'fff', ipa: 'f', word: 'fan', mix: { voiced: 0, noise: 0.45, voicedDirect: false },
+    shape: [[150, -24], [500, -16], [1000, -8], [2000, -3], [4000, 0], [6000, 0], [9000, -3]] },
+  { id: 'jjj', name: 'jjj', ipa: 'ʒ', word: 'measure', mix: { voiced: 0.4, noise: 0.6, voicedDirect: true }, count: 6,
+    shape: [[150, -38], [800, -36], [1500, -22], [2200, -6], [3000, 0], [4200, -3], [6000, -12], [9000, -24]] },
+  { id: 'sss', name: 'sss', ipa: 's', word: 'see', mix: { voiced: 0, noise: 0.9, voicedDirect: false },
+    shape: [[150, -38], [1500, -38], [3000, -28], [4200, -12], [5500, -3], [7000, 0], [9000, -3]] },
+];
+
+export function fricativeInfo(id) {
+  return FRICATIVES.find((x) => x.id === id) || null;
+}
+
+/** Log-frequency interpolation of a shape, on an even grid of fit points. */
+function shapePoints(shape) {
+  const out = [];
+  for (let f = 150; f <= 9000; f *= 2 ** (1 / 6)) {
+    let k = 0;
+    while (k < shape.length - 2 && f > shape[k + 1][0]) k++;
+    const [fa, da] = shape[k];
+    const [fb, db] = shape[k + 1];
+    const u = Math.max(0, Math.min(1, Math.log(f / fa) / Math.log(fb / fa)));
+    out.push({ freq: f, db: da + u * (db - da), kind: 'measured' });
+  }
+  return out;
+}
+
+const fricativeCache = new Map();
+/** The preset filter of a fricative. Deterministic, like exampleFilter. */
+export function fricativeFilter(id, sampleRate = PREFERRED_RATE) {
+  const key = `${id}:${sampleRate}`;
+  if (fricativeCache.has(key)) return clone(fricativeCache.get(key));
+  const fit = fitFilter(shapePoints(fricativeInfo(id).shape), { sampleRate });
+  const out = { bands: fit.bands, fit: fitSummary(fit) };
+  fricativeCache.set(key, out);
+  return clone(out);
+}
+
+export const SPECTRAL_SETTINGS = {
+  fMin: 150, // Hz, lowest band of the estimate
+  fMax: 9000, // Hz, the filter's top centre
+  perOctave: 3, // third-octave bands: broad shape only
+  silenceDb: -55, // section RMS below this is too quiet to measure
+  periodicShare: 0.5, // more periodic frames than this: voiced, so the shape includes harmonics
+  floorDb: -36, // bands further below the strongest count as this far
+};
+
+/**
+ * Broad spectral shape of a sustained fricative: the averaged spectrum of the
+ * section, mean power in third-octave bands, in dB re the strongest band.
+ * White noise through a filter has the filter's own shape, so these are
+ * direct targets for fitFilter. Returns { ok, points, peakHz, voiced, problems,
+ * warnings }.
+ */
+export function measureFricative(x, sampleRate, { from = 0, to = x.length } = {}) {
+  const S = SPECTRAL_SETTINGS;
+  const problems = [];
+  const warnings = [];
+  const len = to - from;
+  if (len < 0.2 * sampleRate) problems.push('The selected section is shorter than 0.2 s. Select a longer steady part.');
+  else if (AV.rmsDb(x, from, to) < S.silenceDb) problems.push(`The selected section is too quiet to measure (below ${S.silenceDb} dBFS). Select the part where you make the sound, or record closer to the microphone.`);
+  if (problems.length) return { ok: false, points: [], peakHz: null, voiced: false, problems, warnings };
+  const spec = M.segmentSpectrum(x, sampleRate, { from, to, fftSize: 2048 });
+  const top = Math.min(S.fMax, 0.45 * sampleRate);
+  const bands = [];
+  for (let f = S.fMin; f <= top; f *= 2 ** (1 / S.perOctave)) {
+    const lo = Math.max(1, Math.round((f * 2 ** (-0.5 / S.perOctave)) / spec.binHz));
+    const hi = Math.min(spec.db.length - 1, Math.max(lo, Math.round((f * 2 ** (0.5 / S.perOctave)) / spec.binHz)));
+    let p = 0;
+    for (let k = lo; k <= hi; k++) p += 10 ** (spec.db[k] / 10);
+    bands.push({ freq: f, level: 10 * Math.log10(p / (hi - lo + 1) + 1e-20) });
+  }
+  const max = Math.max(...bands.map((b) => b.level));
+  const peak = bands.find((b) => b.level === max);
+  const est = AV.estimateFundamental(x, sampleRate, { from, to });
+  const voiced = est.stats.periodicShare > S.periodicShare;
+  if (voiced) warnings.push(`This section repeats like a voiced sound (about ${Math.round(est.f0 || 0)} Hz), so the shape includes its harmonics, not just hiss. If it is your “jjj”, keep the voiced part at a low level and adjust by ear.`);
+  return { ok: true, points: bands.map((b) => ({ freq: b.freq, db: Math.max(S.floorDb, b.level - max), kind: 'measured' })), peakHz: peak.freq, voiced, f0: voiced ? est.f0 : null, problems, warnings };
+}
+
 // ───────────── filter experiments ─────────────
 
 export const ORIGINS = {
   manual: 'shaped by hand',
   example: 'loaded from a vowel example (approximate preset)',
   fitted: 'automatically fitted to a recording',
+  fricative: 'loaded from a fricative starting preset (hand-chosen, not measured)',
+  estimated: 'estimated from the broad spectrum of a recording',
 };
 
 export const WORKFLOWS = {
   explore: 'Explore vowel examples (no recording)',
   custom: 'Filter my own frequencies (no recording)',
   recording: 'Match a recording',
+  fricative: 'Noise and fricatives',
 };
 export const SOURCES = {
   harmonics: 'Equal-strength harmonics',
@@ -629,6 +790,7 @@ export function makeFilterExperiment(p = {}) {
     sourceAmps: sourceAmps(count),
     components,
     filter: { type: FILTER_TYPE, bands, enabled: p.filter ? p.filter.enabled !== false : true },
+    mix: cleanMix(p.mix),
     recordingId: p.recordingId || null,
     recordingName: p.recordingName || null,
     segment: p.segment && Number.isFinite(+p.segment.start) && Number.isFinite(+p.segment.end) ? { start: +p.segment.start, end: +p.segment.end } : null,
@@ -654,11 +816,18 @@ export function vowelLabel(e) {
 }
 
 export function originTag(e) {
-  const base = e.origin === 'fitted' ? 'fitted' : e.origin === 'example' ? 'example' : 'manual';
+  const base = e.origin in ORIGINS ? e.origin : 'manual';
   return e.origin !== 'manual' && e.editedAfter ? `${base}, then edited` : base;
 }
 
 export function sourceTag(e) {
+  const m = cleanMix(e.mix);
+  if (m.noise > 0 && m.voiced === 0) return 'noise only';
+  const tag = sourceTagSines(e);
+  return m.noise > 0 ? `${tag} + noise` : tag;
+}
+
+function sourceTagSines(e) {
   return e.source === 'custom' ? `${e.components.length} own component${e.components.length === 1 ? '' : 's'}` : `${fmt(e.f0)} Hz × ${e.count} equal harmonics`;
 }
 
@@ -699,6 +868,10 @@ export function filterSettingsDocument(e, { sampleRate = PREFERRED_RATE, recordi
     fundamentalHz: custom ? null : e.f0,
     fundamentalSource: custom ? null : e.f0Source === 'automatic' ? 'automatic estimate (YIN)' : e.f0Source === 'default' ? 'default value, not matched to a recording' : 'typed by hand',
     harmonicCount: custom ? null : e.count,
+    mix: {
+      ...cleanMix(e.mix),
+      meaning: `voiced scales the sine components; noise is white noise of peak noise × ${NOISE_PEAK}; voicedDirect sends the sines around the filter`,
+    },
     source: custom ? {
       components: e.components.map((c, i) => ({ row: i + 1, frequencyHz: c.freq, amplitude: c.amp, included: c.on !== false })),
       meaning: 'the person’s own components (not necessarily harmonics), with their own amplitudes, kept unchanged by the filter',
@@ -760,6 +933,7 @@ export function parseFilterSettings(doc) {
     vowel: doc.vowel, vowelText: doc.vowel === 'other' ? doc.vowelLabel : '',
     f0, count: doc.harmonicCount, f0Source: /automatic/.test(doc.fundamentalSource || '') ? 'automatic' : 'typed',
     filter: { bands, enabled: doc.filter.enabled !== false },
+    mix: doc.mix,
     recordingName: doc.recording ? doc.recording.name : null,
     segment: seg && seg.length === 2 ? { start: seg[0], end: seg[1] } : null,
     origin: doc.origin, editedAfter: doc.editedAfterOrigin, example: doc.example, fit: doc.automaticFit, notes: doc.notes,

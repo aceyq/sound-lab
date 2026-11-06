@@ -138,6 +138,10 @@ Manual checks that need real hardware and ears: recording your own voice; whethe
 
 Inside Vowel Lab (or via **🎚 Vowel filtering** in the Mode bar): start from the fundamental and every harmonic at amplitude 1, then shape vowels with a real filter (8 draggable cut-only Web Audio peaking filters). Load approximate A/E/I/O/U examples, or press **Match filter to recording** to fit the filter to a recorded vowel. Filter experiments are saved separately from the other experiments. See [FILTER_VOWEL_UPDATE.md](FILTER_VOWEL_UPDATE.md) for the approach, test results, instructions and sources; `node scripts/verify-filter.mjs` runs the browser checks.
 
+## Frequency Playground: noise and fricatives
+
+The Vowel filtering section has a **Noise source** panel (noise level, harmonic level, and an option for the harmonics to skip the filter) and a fourth workflow, **Noise and fricatives**, with editable starting points for shh, fff, jjj and sss and a small estimate of the filter from a recording. Noise is off by default, so vowels sound as before. See [NOISE_FRICATIVE_UPDATE.md](NOISE_FRICATIVE_UPDATE.md); `node scripts/verify-noise.mjs` runs the browser checks.
+
 ## Frequency Playground known limitations
 
 - **Phase alignment is approximate** at the level of single audio samples. Browsers schedule start times to roughly one sample (about 0.02 ms at 48 kHz). For high frequencies that can shift a component's phase slightly, which changes the exact waveform shape a little but not the spectrum peaks. The waveform plot is a calculation from the table. It is not a live oscilloscope trace of the speaker output.

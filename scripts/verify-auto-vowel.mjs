@@ -73,7 +73,7 @@ const check = (name, ok, detail = '') => {
 };
 
 const errors = [];
-const browser = await playwright.chromium.launch({ executablePath: process.env.CHROME_PATH || undefined, args: ['--autoplay-policy=no-user-gesture-required'] });
+const browser = await playwright.chromium.launch({ executablePath: process.env.CHROME_PATH || undefined, args: ['--autoplay-policy=no-user-gesture-required', '--disable-audio-output'] });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
 const page = await context.newPage();
 page.on('pageerror', (e) => errors.push(String(e)));

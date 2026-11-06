@@ -516,7 +516,7 @@ export function mount(root) {
       : Math.abs(st) < 0.3 ? 'A and B have almost the same fundamental, so the pitch stays steady and you hear mostly the vowel colour change.' : '';
     f0Out.replaceChildren(h('span', { class: 'muted' }, 'Fundamental now '), h('b', {}, hz(p.f0)), ` ${noteName(p.f0)}`);
     mathOut.textContent = project.pitchMode === 'blend'
-      ? `A ${hz(A.f0)} → B ${hz(B.f0)} (${st >= 0 ? '+' : ''}${st.toFixed(2)} semitones). Now ${(t * st).toFixed(2)} semitones from A: ${A.f0.toFixed(1)}^${(1 - t).toFixed(2)} × ${B.f0.toFixed(1)}^${t.toFixed(2)} = ${p.f0.toFixed(1)} Hz.`
+      ? `${(1 - t).toFixed(2)} × ${A.f0.toFixed(1)} Hz + ${t.toFixed(2)} × ${B.f0.toFixed(1)} Hz = ${p.f0.toFixed(1)} Hz. Every harmonic strength is blended the same way.`
       : '';
     bars1.set({ amps: p.amps, overlays: [{ amps: A.amps, color: COLOR_A }, { amps: B.amps, color: COLOR_B }] });
     if (playing && playing.what === '1d') audio.update(p, sliderLabel());

@@ -69,7 +69,7 @@ const check = (name, ok, detail = '') => {
 const errors = [];
 const browser = await playwright.chromium.launch({
   executablePath: process.env.CHROME_PATH || undefined,
-  args: ['--autoplay-policy=no-user-gesture-required', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${micPath}`],
+  args: ['--autoplay-policy=no-user-gesture-required', '--disable-audio-output', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${micPath}`],
 });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true, permissions: ['microphone'] });
 const page = await context.newPage();
@@ -120,11 +120,8 @@ d = await dbg();
 check('Slider at the right end = exactly B’s analyzed parameters', same(d.slider, B));
 await slider.fill('500');
 d = await dbg();
-check('Slider midpoint: f0 = √(fA·fB) (equal semitones from each end)', Math.abs(d.slider.f0 - Math.sqrt(A.f0 * B.f0)) < 1e-9, `${d.slider.f0.toFixed(2)} Hz`);
-check('Midpoint harmonic strengths = dB average (floor −60 dB)', d.slider.amps.every((a, i) => {
-  const e = Math.sqrt(Math.max(1e-3, A.amps[i]) * Math.max(1e-3, B.amps[i]));
-  return e <= 1e-3 * (1 + 1e-9) ? a === 0 : Math.abs(a - e) < 1e-12;
-}));
+check('Slider midpoint: f0 is the plain average of A and B', Math.abs(d.slider.f0 - (A.f0 + B.f0) / 2) < 1e-9, `${d.slider.f0.toFixed(2)} Hz`);
+check('Midpoint harmonic amplitudes are the 50/50 average of A and B', d.slider.amps.every((a, i) => Math.abs(a - (A.amps[i] + B.amps[i]) / 2) < 1e-12));
 check('Position and weights are shown', (await page.locator('.vm-morph .vm-pos').innerText()).includes('weight A 50 %'));
 await page.screenshot({ path: join(shots, 'vowel-morph-1d.png'), fullPage: true });
 
@@ -298,6 +295,26 @@ const an2 = analyzeVowel(w2.samples, w2.sampleRate, { from: 24000, to: 96000 });
 d = await dbg();
 check('Downloaded square WAV is the generated sound at the marker', /vowel-morph_space_x50_y50\.wav/.test(spaceDl.name) && Math.abs(an2.f0 - d.blend.params.f0) < 0.3, `${an2.f0} vs ${d.blend.params.f0.toFixed(2)} Hz`);
 
+// A vowel recorded in the 2D view itself, placed as a dot, then clicked.
+await page.locator('[data-take="space"]').getByRole('button', { name: /Record \(up to/ }).click();
+await page.waitForFunction(() => window.__vowelMorph.debug().project.vowels.length === 5, null, { timeout: 15000 });
+await wait(300);
+d = await dbg();
+const rec2d = d.project.vowels[4];
+check('Recording in the 2D view (fake microphone) gives a reconstruction waiting to be placed', Math.abs(rec2d.analysis.f0 - 220) < 3 && rec2d.analysis.amps.length === 48 && d.placingId === rec2d.id, `${rec2d.analysis.f0} Hz`);
+q = await at(0.5, 0.15);
+await page.mouse.click(q.x, q.y);
+await wait(150);
+await page.getByRole('button', { name: '🔊 Play / explore' }).click();
+q = await at(0.5, 0.15);
+await page.mouse.click(q.x, q.y);
+await wait(150);
+d = await dbg();
+check('Clicking the recorded dot plays its synthesized reconstruction exactly', d.audio.kind === 'synth' && same(d.audio.params, paramsOf(rec2d)));
+await page.getByRole('button', { name: '■ Stop sound' }).click();
+await page.locator('.vm-row', { has: page.getByRole('button', { name: rec2d.name, exact: true }) }).getByRole('button', { name: 'Remove from square' }).click();
+await wait(100);
+
 // Rename, select, remove one dot (no deletion)
 const before = d.project.vowels.length;
 const eeRow = page.locator('.vm-row', { has: page.getByRole('button', { name: ve.name, exact: true }) });
@@ -311,16 +328,16 @@ check('Renaming a vowel updates its dot label', d.project.vowels.find((v) => v.i
 // ── persistence ──
 await page.reload();
 await page.waitForSelector('.vm-page');
-await page.waitForFunction(() => window.__vowelMorph.debug().recordings.length >= 4);
+await page.waitForFunction(() => window.__vowelMorph.debug().recordings.length >= 5);
 d = await dbg();
-check('After reload: all vowels, recordings, pair and dot positions are restored', d.project.vowels.length === before && d.recordings.length === 4 && d.project.pair.a === va.id &&
-  JSON.stringify(d.project.vowels.filter((v) => v.name !== 'Ee').map((v) => v.pos)) === JSON.stringify(JSON.parse(posBefore).filter((_, i) => d.project.vowels[i].name !== 'Ee')));
+check('After reload: all vowels, recordings, pair and dot positions are restored', d.project.vowels.length === before && d.recordings.length === 5 && d.project.pair.a === va.id &&
+  JSON.stringify(d.project.vowels.slice(0, 4).filter((v) => v.name !== 'Ee').map((v) => v.pos)) === JSON.stringify(JSON.parse(posBefore).filter((_, i) => d.project.vowels[i].name !== 'Ee')));
 check('Analyses survive reload exactly', same(paramsOf(d.project.vowels.find((v) => v.id === va.id)), A));
 
 // ── backup ──
 const backup = await download(page.getByRole('button', { name: '⬇ Download backup' }));
 const doc = JSON.parse(backup.data.toString('utf8'));
-check('Backup contains every vowel and its recording', doc.format === 'vowel-morph.backup' && doc.project.vowels.length === 4 && doc.recordings.length === 4, `${(backup.data.length / 1e6).toFixed(1)} MB`);
+check('Backup contains every vowel and its recording', doc.format === 'vowel-morph.backup' && doc.project.vowels.length === 5 && doc.recordings.length === 5, `${(backup.data.length / 1e6).toFixed(1)} MB`);
 const bpath = join(tmpdir(), 'vm-backup.json');
 writeFileSync(bpath, backup.data);
 // A fresh browser profile (different storage) restores it.
@@ -331,10 +348,10 @@ p2.on('pageerror', (e) => errors.push(String(e)));
 await p2.goto(url + '#/vowel-morph');
 await p2.waitForSelector('.vm-page');
 await p2.locator('input[type=file][accept^=".json"]').setInputFiles(bpath);
-await p2.waitForFunction(() => window.__vowelMorph.debug().project.vowels.length === 4);
+await p2.waitForFunction(() => window.__vowelMorph.debug().project.vowels.length === 5);
 const d2 = await p2.evaluate(() => window.__vowelMorph.debug());
 const orig = d.project.vowels;
-check('Importing the backup in another browser profile restores recordings, analyses, pair and positions', d2.recordings.length === 4 &&
+check('Importing the backup in another browser profile restores recordings, analyses, pair and positions', d2.recordings.length === 5 &&
   d2.project.vowels.every((v, i) => v.name === orig[i].name && JSON.stringify(v.pos) === JSON.stringify(orig[i].pos) && same(paramsOf(v), paramsOf(orig[i]))) &&
   d2.project.vowels.find((v) => v.id === d2.project.pair.a).name === 'Aa');
 const recA = d.recordings.find((r) => r.id === orig[0].recordingId);
@@ -342,9 +359,9 @@ const recA2 = d2.recordings.find((r) => r.id === d2.project.vowels[0].recordingI
 check('Restored recordings have the same length and sample rate', recA.length === recA2.length && recA.sampleRate === recA2.sampleRate);
 // Importing again adds, never replaces.
 await p2.locator('input[type=file][accept^=".json"]').setInputFiles(bpath);
-await p2.waitForFunction(() => window.__vowelMorph.debug().project.vowels.length === 8);
+await p2.waitForFunction(() => window.__vowelMorph.debug().project.vowels.length === 10);
 const d3 = await p2.evaluate(() => window.__vowelMorph.debug());
-check('Importing a second time adds copies (“(imported)”) and keeps everything', d3.project.vowels.length === 8 && d3.project.vowels.slice(4).every((v) => v.name.includes('(imported)')));
+check('Importing a second time adds copies (“(imported)”) and keeps everything', d3.project.vowels.length === 10 && d3.project.vowels.slice(5).every((v) => v.name.includes('(imported)')));
 await ctx2.close();
 
 // ── delete asks first ──
@@ -358,7 +375,7 @@ await page.locator('.vm-sel-card .vm-adjust summary').click();
 await page.locator('.vm-sel-card').getByRole('button', { name: '🗑 Delete vowel' }).click();
 await wait(150);
 d = await dbg();
-check('Deleting asks for confirmation, and cancelling keeps the vowel', /Delete “Ee”/.test(asked) && d.project.vowels.length === 4);
+check('Deleting asks for confirmation, and cancelling keeps the vowel', /Delete “Ee”/.test(asked) && d.project.vowels.length === 5);
 page.removeAllListeners('dialog');
 page.on('dialog', (dl) => dl.accept());
 
@@ -393,7 +410,7 @@ p3.on('dialog', (dl) => dl.accept());
 await p3.goto(url + '#/vowel-morph');
 await p3.waitForSelector('.vm-page');
 await p3.locator('input[type=file][accept^=".json"]').setInputFiles(bpath);
-await p3.waitForFunction(() => window.__vowelMorph.debug().project.vowels.length === 4);
+await p3.waitForFunction(() => window.__vowelMorph.debug().project.vowels.length === 5);
 await p3.getByRole('button', { name: '◻ 2D sound space (task 4)' }).click();
 const sq3 = await p3.locator('.vm-square').boundingBox();
 await p3.locator('.vm-square').scrollIntoViewIfNeeded();

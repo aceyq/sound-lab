@@ -6,7 +6,7 @@ Vowel Morph is a third app in the Sound & Signals Lab, next to Frequency Playgro
 
 **Task 3 (1D slider): done and tested with simulated vowels.**
 - There are two clearly labelled areas, Vowel A and Vowel B. Each can record (up to 4 s), import a WAV, play the original, play the synthesized version and adjust the analysis: choose the steady section and correct the f0 by hand.
-- The slider is labelled A on the left and B on the right, with Play blend and Stop controls. The page shows the position and weights, the current fundamental (Hz, note name, semitones from A) and a harmonic bar chart with A's and B's strengths marked.
+- The slider is labelled A on the left and B on the right, with Play blend and Stop controls. The page shows the position and weights, the current fundamental (Hz, note name, the weighted average behind it) and a harmonic bar chart with A's and B's strengths marked.
 - While the sound plays, dragging moves one running bank of 48 sine oscillators. It never restarts. Each endpoint gives that vowel's analyzed numbers exactly.
 - A Pitch option, "Keep A's pitch" or "Keep B's pitch", lets you hear only the change in vowel colour. The default, "Blend pitch A → B", is the only mode in which both endpoints are exact.
 
@@ -42,7 +42,7 @@ Open http://localhost:5173/#/vowel-morph, or open http://localhost:5173 and clic
 5. If needed, open **Adjust analysis**. You can drag across the waveform to pick a steadier section, or type the right f0 if it is an octave off and click **Re-measure at this f0** (it is then labelled MANUAL).
 6. In **Vowel B**, the Name box says `Oo`. Record an "oo" (as in *food*) the same way.
 7. In the slider card, click **▶ Play blend**. Drag the slider slowly from A to B and back.
-8. Watch "Fundamental now", the semitone line and the bars. Click **■ Stop**.
+8. Watch "Fundamental now", the averaging line and the bars. Click **■ Stop**.
 9. Optionally record both vowels again at the same pitch. You can also set **Pitch → Keep A's pitch** to hear only the vowel colour change.
 10. If one take is bad, record again: the earlier take stays in the "Use" list.
 
@@ -58,7 +58,7 @@ Open http://localhost:5173/#/vowel-morph, or open http://localhost:5173 and clic
 
 ## 5. A short explanation for your professor
 
-> "Each vowel I record is analyzed into two things: its fundamental frequency and the relative strengths of its first 48 harmonics. The slider, and in 2D the position in the square, decides how much each recorded vowel counts. The app blends the numbers, not the audio: pitch is averaged on a semitone scale and each harmonic's strength is averaged in decibels. Then it builds a brand-new sound from 48 sine waves at those blended values. That's why the middle of the slider is one voice at an in-between pitch rather than two recordings playing at once. In the square, nearer vowels count more (inverse-distance weighting), and clicking exactly on a dot gives that vowel's analyzed values. The synthesized vowels are approximations, so I can also play each original recording for comparison."
+> "Each vowel I record is analyzed into two things: its fundamental frequency and the relative strengths of its first 48 harmonics. The slider, and in 2D the position in the square, decides how much each recorded vowel counts. The app blends the numbers, not the audio: the fundamental and each harmonic's strength are plain weighted averages. Then it builds a brand-new sound from 48 sine waves at those blended values. That's why the middle of the slider is one voice at an in-between pitch rather than two recordings playing at once. In the square, nearer vowels count more (inverse-distance weighting), and clicking exactly on a dot gives that vowel's analyzed values. The synthesized vowels are approximations, so I can also play each original recording for comparison."
 
 ## 6. The interpolation rules in plain language
 
@@ -66,20 +66,21 @@ Every vowel is stored the same way: **f0** plus **48 harmonic strengths** (harmo
 
 **Weights.** The slider at position *t* gives A the weight 1 − *t* and B the weight *t*. The square gives each placed vowel the weight 1/distance² and then scales the weights so they add up to 1 (Shepard's inverse-distance weighting).
 
-**Pitch: weighted average in semitones** (a weighted geometric mean of the frequencies):
-f0 = f0_A^(1−t) · f0_B^t. Equal slider steps are equal musical steps.
+> **Changed November 5, 2026.** The first version blended pitch in semitones and strengths in decibels. The assignment asks for linear interpolation, so both are now plain weighted averages. The 2D distance weights did not change.
 
-**Harmonic strengths: weighted average in decibels**, harmonic by harmonic (a weighted geometric mean). A missing harmonic counts as −60 dB, the floor. If the blended value ends up at the floor, it plays as silence.
+**Pitch: weighted average in Hz.** f0 = (1 − t) · f0_A + t · f0_B.
+
+**Harmonic strengths: weighted average, harmonic by harmonic.** aₙ = (1 − t) · aₙ_A + t · aₙ_B. A harmonic missing from a vowel counts as 0.
 
 **One full weight means exact values.** When one vowel's weight is 1 (a slider end, or exactly on a dot), the result is that vowel's numbers, unchanged.
 
 **Numerical example (slider at the middle, t = 0.5):**
-- A: f0 = 200 Hz, harmonic 3 = 0.25 (−12 dB). B: f0 = 300 Hz, harmonic 3 = 1 (0 dB).
-- Pitch: √(200 × 300) = **244.9 Hz**. That is 3.51 semitones above A and 3.51 below B. (The plain average, 250 Hz, would be closer to B in musical terms.)
-- Harmonic 3: (−12 dB + 0 dB) / 2 = −6 dB = **0.5**.
-- A harmonic present only in A at 0.05 (−26 dB) becomes (−26 + −60)/2 = −43 dB ≈ 0.007. It is faint but fades out continuously.
+- A: f0 = 200 Hz, harmonic 3 = 0.25. B: f0 = 300 Hz, harmonic 3 = 1.
+- Pitch: (200 + 300) / 2 = **250 Hz**.
+- Harmonic 3: (0.25 + 1) / 2 = **0.625**.
+- A harmonic present only in A at 0.05 becomes (0.05 + 0) / 2 = 0.025.
 
-**What the midpoint means.** It is one harmonic sound at the pitch halfway between A and B in semitones. Each of its harmonics has a strength halfway between A's and B's in decibels. The harmonics are matched by **harmonic number**, not by frequency. When A and B have different pitches, harmonic 3 of A (600 Hz) is blended with harmonic 3 of B (900 Hz). So resonances (formants) do not slide smoothly from one frequency to another. The spectrum changes shape harmonic by harmonic. This is the simple, consistent representation the class notes describe, and it is the main known limitation (see section 7).
+**What the midpoint means.** It is one harmonic sound with the 50/50 average of A's and B's fundamentals and of each pair of harmonic strengths, played by one synthesizer. The harmonics are matched by **harmonic number**, not by frequency. When A and B have different pitches, harmonic 3 of A (600 Hz) is blended with harmonic 3 of B (900 Hz). So resonances (formants) do not slide smoothly from one frequency to another. The spectrum changes shape harmonic by harmonic. This is the simple, consistent representation the class notes describe, and it is the main known limitation (see section 7). Overall loudness is then set by the rule below, one shared gain that keeps the blended strengths' ratios.
 
 **2D example.** Aa sits at x = 0 and Oo at x = 1, on the same height. The marker is a quarter of the way across, so the distances are 0.25 and 0.75. The weights are 1/0.25² : 1/0.75² = 16 : 1.78, which is **90 % Aa and 10 % Oo**. Halfway across, it is 50 % / 50 %, the same as the slider's midpoint (the tests check this).
 
@@ -96,7 +97,8 @@ f0 = f0_A^(1−t) · f0_B^t. Equal slider steps are equal musical steps.
 ## 7. Limitations, test results and what still needs listening
 
 **Automated results (simulated signals, not listening):**
-- `npm test`: **144/144 pass** (26 new Vowel Morph tests and the existing 118). The new tests check:
+- The results below are from October 31, for the first version. The current counts are in `AI_USE.md`, in the November 5 entry.
+- `npm test`: **144/144 pass** (25 new Vowel Morph tests and the existing 119). The new tests check:
   - recovery of a known f0 and harmonic strengths from synthetic tones (within 1 dB)
   - Nyquist handling at 16 kHz, plus failure messages for silence and noise
   - manual f0 correction

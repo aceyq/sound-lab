@@ -12,19 +12,16 @@
 // engine then plays that single harmonic sound with fresh sine waves. Nothing
 // here mixes recordings.
 //
-// Blending rules (the same in 1D and 2D):
-//   pitch      weighted geometric mean: f0 = Π f0ᵢ^wᵢ. On a log/semitone
-//              scale this is the plain weighted average, so halfway between
-//              200 Hz and 300 Hz is 244.9 Hz (equal semitones from each).
-//   harmonic n weighted average in decibels: dBₙ = Σ wᵢ · dBᵢₙ, i.e. the
-//              geometric mean Π aᵢₙ^wᵢ. A missing harmonic (0) counts as the
-//              floor, −60 dB; a blended value at or below the floor plays as 0.
+// Blending rule (the same in 1D and 2D): a plain weighted average of the
+// numbers.
+//   pitch      f0 = Σ wᵢ · f0ᵢ, so halfway between 200 Hz and 300 Hz is 250 Hz.
+//   harmonic n aₙ = Σ wᵢ · aᵢₙ, so halfway between 1 and 0.3 is 0.65. A harmonic
+//              missing from a vowel counts as 0.
 // With one weight equal to 1 the result is exactly that vowel's numbers.
 import { MAX_HARMONICS, F0_MIN, F0_MAX, renderRecipe, newId, uniqueName } from '../frequency/vowel-model.js';
 
 export const HARMONICS = MAX_HARMONICS; // 48, the same as the Vowel Lab analysis
-export const FLOOR_DB = -60;
-export const FLOOR = 10 ** (FLOOR_DB / 20); // 0.001
+export const FLOOR_DB = -60; // lowest level the harmonic bars show
 // Loudness rule: every synthesized sound is scaled to the same RMS level,
 // 0.1 (−20 dBFS), before the volume control. Because there are at most 48
 // sines, its peak can never exceed √(2·48) × 0.1 ≈ 0.98, so nothing clips.
@@ -83,18 +80,14 @@ export function blendParams(items) {
   // A single full weight: return that vowel's numbers exactly.
   const full = list.find((it) => it.weight / total === 1);
   if (full) return { f0: full.params.f0, amps: [...full.params.amps] };
-  let logF = 0;
-  const logA = new Array(HARMONICS).fill(0);
+  let f0 = 0;
+  const amps = new Array(HARMONICS).fill(0);
   for (const it of list) {
     const w = it.weight / total;
-    logF += w * Math.log(it.params.f0);
-    for (let n = 0; n < HARMONICS; n++) logA[n] += w * Math.log(Math.max(FLOOR, it.params.amps[n] || 0));
+    f0 += w * it.params.f0;
+    for (let n = 0; n < HARMONICS; n++) amps[n] += w * (it.params.amps[n] || 0);
   }
-  const amps = logA.map((l) => {
-    const a = Math.exp(l);
-    return a <= FLOOR * (1 + 1e-9) ? 0 : Math.min(1, a);
-  });
-  return { f0: Math.exp(logF), amps };
+  return { f0, amps: amps.map((a) => Math.min(1, a)) };
 }
 
 // Optional for the slider: hold the pitch at one end to hear only the change

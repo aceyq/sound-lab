@@ -28,7 +28,7 @@ const check = (name, ok, detail = '') => {
 };
 const browser = await playwright.chromium.launch({
   executablePath: process.env.CHROME_PATH || undefined,
-  args: ['--autoplay-policy=no-user-gesture-required'],
+  args: ['--autoplay-policy=no-user-gesture-required', '--disable-audio-output'],
 });
 const errors = [];
 async function newPage(opts = {}, init) {

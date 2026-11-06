@@ -33,7 +33,7 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  — ' + detail : ''}`);
 };
 const errors = [];
-const browser = await playwright.chromium.launch({ executablePath: process.env.CHROME_PATH || undefined, args: ['--autoplay-policy=no-user-gesture-required'] });
+const browser = await playwright.chromium.launch({ executablePath: process.env.CHROME_PATH || undefined, args: ['--autoplay-policy=no-user-gesture-required', '--disable-audio-output'] });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
 const page = await context.newPage();
 page.on('pageerror', (e) => errors.push(String(e)));
@@ -231,7 +231,7 @@ for (; n < 20; n++) {
   if (t.stepId === 'recording') await page.screenshot({ path: shots + 'workflow-03-tour-no-recording.png' });
   await page.locator('.vtour-pop .tour-buttons .btn.primary').click();
 }
-check('Tour works with no recordings: every step opens, controls are in view, recording steps explain and point at the workflow 3 tab', ok && n === 15 && seen.includes('recording*') && seen.includes('match*'), seen.join(' → '));
+check('Tour works with no recordings: every step opens, controls are in view, recording steps explain and point at the workflow 3 tab', ok && n === 16 && seen.includes('recording*') && seen.includes('match*'), seen.join(' → '));
 
 // Phone width, workflow 2.
 await sec.locator('select[aria-label="Filter experiment"]').selectOption(w2.id);

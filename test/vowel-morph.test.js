@@ -8,12 +8,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  HARMONICS, FLOOR, TARGET_RMS, blendParams, interpolate1D, sliderParams, idwWeights, blendAt, closePairs,
+  HARMONICS, TARGET_RMS, blendParams, interpolate1D, sliderParams, idwWeights, blendAt, closePairs,
   nyquistTaper, playedAmps, oscillatorTargets, loudnessGain, rmsOfAmps, renderParams, paramsOf, isUsable,
   makeVowel, emptyProject, loadProject, takeName, makeBackup, parseBackup, floatsToBase64, base64ToFloats, noteName,
 } from '../src/pages/vowel-morph/morph-model.js';
 import { analyzeTake, initialSegment } from '../src/pages/vowel-morph/morph-analysis.js';
-import { originalLevel } from '../src/pages/vowel-morph/morph-audio.js';
+import { MorphAudio, originalLevel } from '../src/pages/vowel-morph/morph-audio.js';
 import { analyzeVowel } from '../src/pages/frequency/auto-vowel.js';
 
 const SR = 48000;
@@ -103,36 +103,28 @@ test('slider endpoints reproduce A and B exactly', () => {
   assert.deepEqual(interpolate1D(A, B, 1.7), B);
 });
 
-test('slider midpoint: geometric-mean pitch and dB-average strengths', () => {
+test('slider midpoint: the 50/50 linear average of f0 and of every harmonic amplitude', () => {
   const m = interpolate1D(A, B, 0.5);
-  assert.ok(Math.abs(m.f0 - Math.sqrt(200 * 300)) < 1e-9); // 244.95 Hz
-  assert.ok(Math.abs(12 * Math.log2(m.f0 / 200) - 12 * Math.log2(300 / m.f0)) < 1e-9); // equal semitones from each end
-  // h1: 1 (0 dB) and 0.3 (−10.46 dB) → −5.23 dB = 0.5477
-  assert.ok(Math.abs(m.amps[0] - Math.sqrt(0.3)) < 1e-12);
-  // h3: 0.25 and 1 → 0.5
-  assert.ok(Math.abs(m.amps[2] - 0.5) < 1e-12);
-  // h5: 0.05 in A, missing (floor −60 dB) in B → √(0.05 × 0.001) ≈ 0.00707
-  assert.ok(Math.abs(m.amps[4] - Math.sqrt(0.05 * FLOOR)) < 1e-12);
-  // h7+ missing in both → exactly 0
-  assert.ok(m.amps.slice(6).every((a) => a === 0));
-  // A quarter of the way: pitch 200^0.75 · 300^0.25
+  assert.equal(m.f0, 250);
+  m.amps.forEach((a, i) => assert.ok(Math.abs(a - (A.amps[i] + B.amps[i]) / 2) < 1e-12, `h${i + 1}`));
+  assert.ok(Math.abs(m.amps[0] - 0.65) < 1e-12); // 1 and 0.3
+  assert.ok(Math.abs(m.amps[4] - 0.025) < 1e-12); // 0.05 and missing (0)
+  assert.ok(m.amps.slice(6).every((a) => a === 0)); // missing in both
+  // A quarter of the way.
   const q = interpolate1D(A, B, 0.25);
-  assert.ok(Math.abs(q.f0 - 200 ** 0.75 * 300 ** 0.25) < 1e-9);
+  assert.ok(Math.abs(q.f0 - 225) < 1e-9);
+  q.amps.forEach((a, i) => assert.ok(Math.abs(a - (0.75 * A.amps[i] + 0.25 * B.amps[i])) < 1e-12));
 });
 
-test('slider movement gives finite values that change smoothly (no jumps above the floor)', () => {
+test('slider movement gives finite values that change in equal steps (no jumps)', () => {
   let prev = null;
   for (let k = 0; k <= 1000; k++) {
     const p = interpolate1D(A, B, k / 1000);
     assert.ok(Number.isFinite(p.f0) && p.f0 >= 200 && p.f0 <= 300);
     assert.ok(p.amps.every((a) => Number.isFinite(a) && a >= 0 && a <= 1));
     if (prev) {
-      assert.ok(Math.abs(12 * Math.log2(p.f0 / prev.f0)) < 0.01, 'pitch step under 1 cent per 1/1000');
-      p.amps.forEach((a, i) => {
-        const b = prev.amps[i];
-        if (a > 0 && b > 0) assert.ok(Math.abs(db(a) - db(b)) < 0.1, `h${i + 1} step`);
-        else assert.ok(Math.max(a, b) <= FLOOR * 1.02, `h${i + 1} only switches on/off at the −60 dB floor`);
-      });
+      assert.ok(Math.abs(p.f0 - prev.f0 - 0.1) < 1e-9, 'f0 step is (300 − 200) / 1000');
+      p.amps.forEach((a, i) => assert.ok(Math.abs(a - prev.amps[i] - (B.amps[i] - A.amps[i]) / 1000) < 1e-9, `h${i + 1} step`));
     }
     prev = p;
   }
@@ -215,7 +207,7 @@ test('coincident and nearly coincident dots are handled safely', () => {
   assert.deepEqual(closePairs(near), [[0, 1]]);
   // Blending two different vowels stacked on one spot gives one finite sound.
   const r = blendAt([vowelFrom(A, { pos: same[0] }), vowelFrom(B, { pos: same[1] })], same[0]);
-  assert.ok(Number.isFinite(r.params.f0) && Math.abs(r.params.f0 - Math.sqrt(200 * 300)) < 1e-9);
+  assert.equal(r.params.f0, 250);
 });
 
 test('2D with zero or one usable dot: clear status and single-vowel playback', () => {
@@ -231,12 +223,63 @@ test('2D with zero or one usable dot: clear status and single-vowel playback', (
   assert.equal(notPlaced.contributions.length, 1);
 });
 
+test('2D click equidistant from the dots: equal weights and the plain average of f0 and every harmonic', () => {
+  const C = { f0: 400, amps: full([0.5, 1, 0.2]) };
+  const D = { f0: 100, amps: full([0.2, 0.2, 0.2, 1]) };
+  const vs = [vowelFrom(A, { pos: { x: 0.2, y: 0.2 } }), vowelFrom(B, { pos: { x: 0.8, y: 0.2 } }), vowelFrom(C, { pos: { x: 0.8, y: 0.8 } }), vowelFrom(D, { pos: { x: 0.2, y: 0.8 } })];
+  for (const power of [1, 2, 4]) {
+    const r = blendAt(vs, { x: 0.5, y: 0.5 }, power);
+    r.contributions.forEach((c) => assert.ok(Math.abs(c.weight - 0.25) < 1e-12));
+    assert.ok(Math.abs(r.params.f0 - 250) < 1e-9);
+    r.params.amps.forEach((a, i) => assert.ok(Math.abs(a - (A.amps[i] + B.amps[i] + C.amps[i] + D.amps[i]) / 4) < 1e-12, `h${i + 1}`));
+  }
+});
+
 test('2D uses the same blend rule as the slider: between two dots it equals the slider', () => {
   const vowels = [vowelFrom(A, { pos: { x: 0, y: 0.5 } }), vowelFrom(B, { pos: { x: 1, y: 0.5 } })];
   const r = blendAt(vowels, { x: 0.5, y: 0.5 });
   const s = interpolate1D(A, B, 0.5);
   assert.ok(Math.abs(r.params.f0 - s.f0) < 1e-9);
   r.params.amps.forEach((a, i) => assert.ok(Math.abs(a - s.amps[i]) < 1e-12));
+});
+
+// ───────────── playback path ─────────────
+
+// A minimal Web Audio stand-in that records every node the engine creates.
+function fakeAudio() {
+  const made = { oscillators: [], bufferSources: [], gains: 0 };
+  const param = (v = 0) => ({ value: v, setValueAtTime() {}, linearRampToValueAtTime() {}, setTargetAtTime(x) { this.value = x; }, cancelScheduledValues() {} });
+  const node = () => ({ connect(d) { return d; }, disconnect() {} });
+  class Ctx {
+    constructor() { this.sampleRate = 48000; this.currentTime = 0; this.state = 'running'; this.destination = node(); }
+    createGain() { made.gains++; return { ...node(), gain: param(1) }; }
+    createOscillator() { const o = { ...node(), type: 'sine', frequency: param(440), started: 0, start() { this.started++; }, stop() {} }; made.oscillators.push(o); return o; }
+    createBufferSource() { const b = { ...node(), start() {}, stop() {} }; made.bufferSources.push(b); return b; }
+    createBuffer() { return { copyToChannel() {} }; }
+    resume() { return Promise.resolve(); }
+    close() { return Promise.resolve(); }
+  }
+  return { Ctx, made };
+}
+
+test('playback path: a whole slider sweep is one bank of 48 sines, with no recording or second sound', () => {
+  const { Ctx, made } = fakeAudio();
+  globalThis.window = { AudioContext: Ctx };
+  try {
+    const audio = new MorphAudio();
+    audio.playSynth(interpolate1D(A, B, 0), 'sweep');
+    for (let k = 1; k <= 100; k++) audio.update(interpolate1D(A, B, k / 100));
+    assert.equal(made.oscillators.length, HARMONICS, 'one oscillator per harmonic, created once');
+    assert.ok(made.oscillators.every((o) => o.started === 1), 'never restarted');
+    assert.equal(made.bufferSources.length, 0, 'no audio buffer: no recording is ever played');
+    assert.equal(audio.kind, 'synth');
+    audio.update(interpolate1D(A, B, 0.5));
+    assert.equal(audio.debug().params.f0, 250);
+    assert.equal(audio.debug().oscillators, HARMONICS);
+    made.oscillators.forEach((o, i) => { if (o.frequency.value) assert.ok(Math.abs(o.frequency.value - (i + 1) * 250) < 1e-9, `oscillator ${i + 1}`); });
+  } finally {
+    delete globalThis.window;
+  }
 });
 
 // ───────────── sound ─────────────

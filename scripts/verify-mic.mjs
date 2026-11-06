@@ -84,7 +84,7 @@ async function openPage(browser, target, { grant = true, init = null } = {}) {
   return { context, page };
 }
 
-const flags = ['--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${wavPath}`, '--autoplay-policy=no-user-gesture-required'];
+const flags = ['--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${wavPath}`, '--autoplay-policy=no-user-gesture-required', '--disable-audio-output'];
 const browser = await playwright.chromium.launch({ executablePath: process.env.CHROME_PATH || undefined, args: [...flags, '--use-fake-ui-for-media-stream'] });
 let { page } = await openPage(browser, url);
 const dbg = () => page.evaluate(() => window.__frequencyPlayground.debug());

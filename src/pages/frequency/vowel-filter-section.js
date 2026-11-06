@@ -4,7 +4,8 @@
 // automatically to a recording. Lives inside the Vowel Lab so it can use its
 // recordings, but keeps its own experiments (vowel-store FILTER_KEY), its own
 // audio (FilterAudio) and never edits the harmonic sliders or any manual or
-// automatic experiment.
+// automatic experiment. The source can also include white noise, shaped by the
+// same filter, for fricatives (workflow 4).
 import { h, fmtHz, fmtTime } from '../../lib/dom.js';
 import * as M from './vowel-model.js';
 import * as AV from './auto-vowel.js';
@@ -46,6 +47,7 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
     f0Msg: null,
     storage: { ok: true, error: '' },
     owner: false, // true while this section's audio is the one playing
+    fricFit: null, // last spectral estimate shown: { ok, problems, warnings, summary, peakHz, voiced, name }
   };
   let dirty = true;
   let origSpec = null;
@@ -184,7 +186,8 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
   fel.tabExplore = h('button', { class: 'btn vf-tab', 'data-wf': 'explore', onclick: () => setWorkflow('explore') }, h('strong', {}, '1 · Explore vowel examples'), h('span', { class: 'vf-tab-sub' }, 'sine waves only, no recording'));
   fel.tabCustom = h('button', { class: 'btn vf-tab', 'data-wf': 'custom', onclick: () => setWorkflow('custom') }, h('strong', {}, '2 · Filter my own frequencies'), h('span', { class: 'vf-tab-sub' }, 'any components you type, no recording'));
   fel.tabRecording = h('button', { class: 'btn vf-tab', 'data-wf': 'recording', onclick: () => setWorkflow('recording') }, h('strong', {}, '3 · Match a recording'), h('span', { class: 'vf-tab-sub' }, 'compare with and fit to your voice'));
-  fel.workflowTabs = h('div', { class: 'vf-tabs', role: 'group', 'aria-label': 'Vowel filtering workflow' }, fel.tabExplore, fel.tabCustom, fel.tabRecording);
+  fel.tabFricative = h('button', { class: 'btn vf-tab', 'data-wf': 'fricative', onclick: () => setWorkflow('fricative') }, h('strong', {}, '4 · Noise and fricatives'), h('span', { class: 'vf-tab-sub' }, 'shh, fff, jjj, sss from filtered noise'));
+  fel.workflowTabs = h('div', { class: 'vf-tabs', role: 'group', 'aria-label': 'Vowel filtering workflow' }, fel.tabExplore, fel.tabCustom, fel.tabRecording, fel.tabFricative);
   fel.workflowHint = h('p', { class: 'help vf-wf-hint', 'aria-live': 'polite' });
   fel.srcHarm = h('input', { type: 'radio', name: 'vf-source', value: 'harmonics', onchange: () => setWorkflow(st.work.workflow === 'recording' ? 'recording' : 'explore') });
   fel.srcCustom = h('input', { type: 'radio', name: 'vf-source', value: 'custom', onchange: () => setWorkflow('custom') });
@@ -193,6 +196,40 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
     h('label', { class: 'check' }, fel.srcHarm, ' Equal-strength harmonics'),
     h('label', { class: 'check' }, fel.srcCustom, ' My own frequencies'),
     fel.sourceNote = h('span', { class: 'help inline' }));
+
+  // noise and the source mix
+  const mixSlider = (key, label) => {
+    const inp = h('input', { type: 'range', min: 0, max: 100, step: 1, value: '0', class: 'vl-volume', 'aria-label': label });
+    const out = h('output', { class: 'mono' }, '0%');
+    inp.addEventListener('input', () => setMix({ [key]: Number(inp.value) / 100 }));
+    return { inp, out };
+  };
+  fel.noiseLevel = mixSlider('noise', 'Noise level');
+  fel.voicedLevel = mixSlider('voiced', 'Harmonic level');
+  fel.voicedDirect = h('input', { type: 'checkbox', 'aria-label': 'Harmonics skip the filter', onchange: (e) => setMix({ voicedDirect: e.target.checked }) });
+  fel.noisePlay = h('button', { class: 'btn primary', 'aria-label': 'Play filtered noise only', onclick: () => playNoiseOnly() }, '▶ Filtered noise only');
+  fel.mixPlay = h('button', { class: 'btn', 'aria-label': 'Play this mix', onclick: () => playSource(true) }, '▶ Play this mix');
+  fel.noiseStop = h('button', { class: 'btn', 'aria-label': 'Stop (noise)', onclick: () => stopAudio() }, '■ Stop');
+  fel.noiseNow = h('span', { class: 'vl-now', role: 'status', 'aria-live': 'polite' });
+  fel.noiseInfo = h('p', { class: 'help', 'aria-live': 'polite' });
+
+  // fricatives
+  fel.fricBtns = VF.FRICATIVES.map((x) => h('button', { class: 'btn vf-fric', 'data-fricative': x.id, title: `/${x.ipa}/ as in ${x.word}`, 'aria-label': `Fricative starting point ${x.name}, as in ${x.word}`, onclick: () => loadFricative(x.id) },
+    h('strong', {}, x.name), ` · “${x.word}”`));
+  fel.fricPlay = h('button', { class: 'btn primary', 'aria-label': 'Play (fricatives)', onclick: () => playSource(true) }, '▶ Play');
+  fel.fricStop = h('button', { class: 'btn', 'aria-label': 'Stop (fricatives)', onclick: () => stopAudio() }, '■ Stop');
+  fel.fricNow = h('span', { class: 'vl-now', role: 'status', 'aria-live': 'polite' });
+  fel.fricInfo = h('div', { class: 'help vf-ex-info', 'aria-live': 'polite' });
+  fel.fricEstimate = h('button', { class: 'btn', onclick: () => estimateFricative() }, '🔍 Estimate filter from recording');
+  fel.fricFitBox = h('div', { class: 'vf-fit', 'aria-live': 'polite' });
+  fel.fricBox = h('div', { class: 'vl-sub-box vf-fricatives' },
+    h('h4', {}, 'Try a fricative (editable starting points)'),
+    h('div', { class: 'row gap wrap' }, fel.fricBtns),
+    h('div', { class: 'row gap wrap' }, fel.fricPlay, fel.fricStop, fel.fricNow),
+    fel.fricInfo,
+    h('h4', {}, 'Or estimate the filter from a recording'),
+    h('div', { class: 'row gap wrap' }, fel.fricEstimate, h('span', { class: 'help inline' }, 'Record a steady “shh” in stage 1, choose it above, then press this. Only the broad spectral shape is measured.')),
+    fel.fricFitBox);
 
   // custom components
   fel.customRows = h('div', { class: 'vf-custom-rows' });
@@ -228,6 +265,13 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
     fel.recLabelSlot = h('div', {}),
     help('The label only names the experiment and its files. Vowel letters are pronounced differently across words and languages, so each label has an example word for the steady vowel meant.'));
   fel.sourcePanel = step('S', 'Source sound', fel.sourceChoice, fel.harmBox, fel.customBox);
+  fel.noisePanel = step('N', 'Noise source (optional)',
+    h('div', { class: 'vf-mix' },
+      h('label', { class: 'row gap' }, 'Noise level', fel.noiseLevel.inp, fel.noiseLevel.out),
+      h('label', { class: 'row gap' }, 'Harmonic level', fel.voicedLevel.inp, fel.voicedLevel.out)),
+    h('label', { class: 'check' }, fel.voicedDirect, ' Harmonics skip the filter (only the noise is shaped, useful for a voiced sound like “jjj”)'),
+    h('div', { class: 'row gap wrap' }, fel.noisePlay, fel.mixPlay, fel.noiseStop, fel.noiseNow),
+    fel.noiseInfo);
   fel.listenOrigBits = [fel.playOrig, fel.playAB];
   fel.matchOrigLabel = h('label', { class: 'check', title: 'Scales only the original recording, so its highest peak equals the filtered sound’s. The filtered and unfiltered sounds are not re-scaled by this.' }, fel.matchOrig, ' Match the original’s peak to the filtered sound');
   fel.saveLabelSlot = h('div', {});
@@ -244,14 +288,17 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
         h('dt', {}, 'Harmonics'), h('dd', {}, 'Components at whole-number multiples of the fundamental: 2 × f0, 3 × f0, … With “equal-strength harmonics” every one starts at the same strength as the fundamental.'),
         h('dt', {}, 'Components'), h('dd', {}, 'Any sine waves in the source. With “my own frequencies” they can be any frequencies, so they are not necessarily harmonics.'),
         h('dt', {}, 'Filter'), h('dd', {}, 'Changes the strength of frequency regions. This one only reduces (0 dB = unchanged), so a region becomes more prominent when the regions around it are reduced.'),
-        h('dt', {}, 'Formants'), h('dd', {}, 'Broad resonant regions emphasized by the vocal tract (throat, mouth, lips) that help tell vowels apart. A formant is a region, not an individual harmonic.')),
+        h('dt', {}, 'Formants'), h('dd', {}, 'Broad resonant regions emphasized by the vocal tract (throat, mouth, lips) that help tell vowels apart. A formant is a region, not an individual harmonic.'),
+        h('dt', {}, 'Noise'), h('dd', {}, 'A hiss with energy at every frequency instead of separate harmonics. The filter shapes it the same way, so you hear and see broad regions rise and fall.'),
+        h('dt', {}, 'Fricative'), h('dd', {}, 'A consonant made by forcing air through a narrow gap, such as “shh” or “sss”. It is mostly shaped noise; a voiced one also has the vocal folds buzzing.')),
       h('p', {}, 'The filter never moves a component’s frequency (with the fundamental fixed, harmonic n stays at n × f0). It only changes how strong each one is.')),
     h('div', { class: 'vf-bar row gap wrap' }, h('span', { class: 'ctl-label' }, 'Filter experiment'), fel.expSelect, fel.saveState, fel.saveBtn, fel.saveNewBtn, fel.newBtn),
     fel.workflowTabs,
     fel.workflowHint,
     fel.recPanel,
     fel.sourcePanel,
-    fel.examplePanel = h('div', { class: 'vf-two' }, fel.exampleBox, fel.matchBox),
+    fel.noisePanel,
+    fel.examplePanel = h('div', { class: 'vf-two' }, fel.exampleBox, fel.matchBox, fel.fricBox),
     step('F', 'Shape the filter',
       h('div', { class: 'row gap wrap' }, fel.filterToggle, fel.resetBtn,
         h('div', { class: 'seg-group', role: 'group', 'aria-label': 'Frequency range' }, fel.rangeButtons), fel.logBtn),
@@ -294,8 +341,11 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
         h('li', {}, h('strong', {}, 'Bypass. '), 'The source goes around the filter instead of through it, with the same gain g, crossfaded over 30 ms. Nothing is turned up after the filter (unless you tick the optional makeup gain), so you hear how much it really removes.'),
         h('li', {}, h('strong', {}, 'Automatic fit (workflow 3). '), 'The existing automatic analysis measures the fundamental (YIN) and the harmonic strengths of the selected section. Harmonics that stand out from the noise are targets; weaker ones only give an upper limit. A least-squares search (Levenberg–Marquardt) then adjusts only the 8 points’ centres, cuts and widths, plus one overall level, so the filter’s gain at each n × f0 follows the recording’s pattern. It works with the equal-strength harmonic source only.'),
         h('li', {}, h('strong', {}, 'Examples. '), 'Average formant frequencies of American English vowels from Hillenbrand et al. (1995) are turned into a smooth vowel-like envelope (five resonances plus a −6 dB/octave voice slope) and fitted with the same 8 points. They are approximate starting filters based on typical vocal resonances, not copies of your voice or guaranteed matches for every speaker, and they have not been checked by listening tests.'),
+        h('li', {}, h('strong', {}, 'Noise. '), `A fixed loop of white noise of peak ${VF.NOISE_PEAK} × the noise level joins the source before the filter. The harmonic level scales the sine components, and at 100 % with noise at 0 the sound is the same as without this feature. “Harmonics skip the filter” sends the sines around it, so only the noise is shaped.`),
+        h('li', {}, h('strong', {}, 'Fricative starting points (workflow 4). '), 'The filter shapes, noise levels and harmonic levels are hand-chosen from the general pattern in the phonetics literature (Stevens 1998; Jongman, Wayland & Wong 2000): “sss” highest, “shh” lower, “fff” weak and flat. They are not measured from a voice and have not been checked by listening. “jjj” is read as the voiced sound in “measure”.'),
+        h('li', {}, h('strong', {}, 'Estimate from a recording (workflow 4). '), 'The averaged spectrum of the section is reduced to third-octave levels from 150 Hz to 9 kHz, and the 8 points are fitted to that shape. Only the filter is estimated; the noise level is kept and any voiced setting is a suggestion. It captures a broad average only, with no timing, and the microphone and room are part of what it measures.'),
         h('li', {}, h('strong', {}, 'Limits. '), '8 broad bands cannot reproduce narrow peaks or every detail; the fit reports its remaining error. The filter keeps its frequencies when you change f0, but the same filter at another pitch acts on different harmonics, so the vowel may not sound the same.')),
-      h('p', { class: 'muted' }, 'Sources: Fant (1960) Acoustic Theory of Speech Production; Klatt (1980) JASA 67(3); Hillenbrand, Getty, Clark & Wheeler (1995) JASA 97(5); W3C Web Audio API, BiquadFilterNode; R. Bristow-Johnson, Audio EQ Cookbook. See FILTER_VOWEL_UPDATE.md.')),
+      h('p', { class: 'muted' }, 'Sources: Fant (1960) Acoustic Theory of Speech Production; Stevens (1998) Acoustic Phonetics; Jongman, Wayland & Wong (2000) JASA 108(3); Klatt (1980) JASA 67(3); Hillenbrand, Getty, Clark & Wheeler (1995) JASA 97(5); W3C Web Audio API, BiquadFilterNode; R. Bristow-Johnson, Audio EQ Cookbook. See FILTER_VOWEL_UPDATE.md.')),
   );
 
   function details(summary, ...body) {
@@ -411,7 +461,7 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
   /** A new unsaved experiment that keeps the recording, section, label, f0 and count. */
   function derived(patch) {
     const w = st.work;
-    return VF.makeFilterExperiment({ workflow: w.workflow, source: w.source, components: clone(w.components), recordingId: w.recordingId, recordingName: w.recordingName, segment: w.segment, vowel: w.vowel, vowelText: w.vowelText, f0: w.f0, f0Source: w.f0Source, count: w.count, ...patch });
+    return VF.makeFilterExperiment({ workflow: w.workflow, source: w.source, components: clone(w.components), recordingId: w.recordingId, recordingName: w.recordingName, segment: w.segment, vowel: w.vowel, vowelText: w.vowelText, f0: w.f0, f0Source: w.f0Source, count: w.count, mix: { ...w.mix }, ...patch });
   }
 
   function openFilterExperiment(id) {
@@ -458,8 +508,10 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
   const comps = () => VF.sourceComponents(st.work);
   // Render arguments: equal-strength harmonics go through the same renderer as
   // before (f0, count); your own rows through the component renderer.
-  const srcArgs = () => (st.work.source === 'custom' ? { components: comps() } : { f0: st.work.f0, count: st.work.count });
-  const isRecWf = () => st.work.workflow === 'recording';
+  const srcArgs = () => ({ ...(st.work.source === 'custom' ? { components: comps() } : { f0: st.work.f0, count: st.work.count }), mix: st.work.mix });
+  const isRecWf = () => st.work.workflow === 'recording' || st.work.workflow === 'fricative';
+  const silent = () => !VF.hasSound(comps(), st.work.mix, rate());
+  const shownComps = () => (st.work.mix.voiced > 0 ? comps() : []);
 
   /** Switches workflow. Only 'custom' uses your own rows; the others use equal-strength harmonics. Nothing else changes. */
   function setWorkflow(wf) {
@@ -474,7 +526,7 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
       st.work.components = VF.generateHarmonicRows(st.work.f0, 8, 'falling');
       st.customMsg = `Started with 8 example rows (harmonics of ${fmtNum(st.work.f0)} Hz, amplitudes 1, 1/2, 1/3 …). Edit, remove or replace them freely.`;
     }
-    if (wf === 'recording' && !st.work.recordingId) {
+    if ((wf === 'recording' || wf === 'fricative') && !st.work.recordingId) {
       const d = defaultsFromLab();
       if (d.recordingId) { st.work.recordingId = d.recordingId; st.work.recordingName = d.recordingName; st.work.segment = d.segment; }
     }
@@ -748,6 +800,112 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
     renderFit();
   }
 
+  // ───────────── noise and fricatives ─────────────
+  function setMix(patch) {
+    st.work.mix = VF.cleanMix({ ...st.work.mix, ...patch });
+    onMixChange();
+  }
+
+  function onMixChange() {
+    recomputeMakeup();
+    if (st.owner && audio.state !== 'idle') { audio.setMix(st.work.mix); audio.setFilter(audioFilter()); }
+    specDirty = true;
+    drySpec = null;
+    dirty = true;
+    renderMix();
+    updateTransport();
+    updateLevelInfo();
+    updateSaveState();
+  }
+
+  /** Hears the noise through the filter with the harmonics turned down. */
+  function playNoiseOnly() {
+    setMix({ voiced: 0, noise: st.work.mix.noise > 0 ? st.work.mix.noise : 0.7 });
+    playSource(true);
+  }
+
+  /** Loads a fricative's starting filter and levels into the open experiment. */
+  function loadFricative(id) {
+    const w = st.work;
+    const x = VF.fricativeInfo(id);
+    const handShaped = w.origin === 'manual' && w.filter.bands.some((b) => b.gainDb !== 0) && isDirty();
+    if (handShaped && !window.confirm(`Replace your hand-shaped filter with the “${x.name}” starting point? (Save first if you want to keep it.)`)) return;
+    const ex = VF.fricativeFilter(id, rate());
+    w.filter.bands = ex.bands.map((b) => ({ ...b }));
+    w.filter.enabled = true;
+    w.origin = 'fricative';
+    w.editedAfter = false;
+    w.example = null;
+    w.fit = ex.fit;
+    w.vowel = 'other';
+    w.vowelText = x.name;
+    w.mix = VF.cleanMix(x.mix);
+    if (x.count) { w.count = x.count; w.sourceAmps = VF.sourceAmps(x.count); }
+    st.fricFit = null;
+    onMixChange();
+    onSourceChange();
+    onFilterChange({ edited: false });
+    renderLabels();
+    renderFricatives();
+    logChange(`Loaded the “${x.name}” starting point: noise ${Math.round(w.mix.noise * 100)} %, harmonics ${Math.round(w.mix.voiced * 100)} %, hand-chosen filter shape. Adjust it by ear.`);
+  }
+
+  /** Fits the filter to the broad spectrum of the selected section (a new experiment). */
+  function estimateFricative() {
+    const r = rec();
+    if (!r) { st.fricFit = { ok: false, problems: ['Choose a recording and a steady section above first.'], warnings: [] }; renderFricatives(); return; }
+    const { from, to } = segSamples(r);
+    const m = VF.measureFricative(r.samples, r.sampleRate, { from, to });
+    if (!m.ok) { st.fricFit = { ok: false, problems: m.problems, warnings: m.warnings }; renderFricatives(); return; }
+    const fit = VF.fitFilter(m.points, { sampleRate: rate() });
+    if (st.work && isDirty() && st.work.filter.bands.some((b) => b.gainDb !== 0) && !window.confirm(`The estimated filter opens as a new, unsaved filter experiment. Discard unsaved changes to “${VF.filterLabel(st.work)}”?`)) return;
+    const mix = { noise: st.work.mix.noise > 0 ? st.work.mix.noise : 0.8, voiced: m.voiced ? 0.4 : 0, voicedDirect: m.voiced };
+    const summary = { ...VF.fitSummary(fit), recordingName: r.name, sectionSec: [round3(from / r.sampleRate), round3(to / r.sampleRate)], peakHz: Math.round(m.peakHz) };
+    load(derived({ workflow: 'fricative', source: 'harmonics', origin: 'estimated', vowel: 'other', vowelText: `estimate of ${r.name}`, filter: { bands: fit.bands, enabled: true }, fit: summary, mix, count: m.voiced ? 6 : st.work.count,
+      ...(m.voiced ? { f0: Math.round(m.f0 * 100) / 100, f0Source: 'automatic' } : {}),
+      notes: `Filter estimated from the broad spectrum of “${r.name}” ${summary.sectionSec[0]}–${summary.sectionSec[1]} s: ${fit.rmsDb.toFixed(1)} dB RMS error over ${fit.measuredCount} third-octave bands.` }));
+    st.fricFit = { ok: true, summary, voiced: m.voiced, warnings: m.warnings, problems: [] };
+    renderFricatives();
+    logChange(`Estimated a noise filter from “${r.name}”: strongest near ${fmtHz(summary.peakHz)}, ${fit.rmsDb.toFixed(1)} dB RMS error. New unsaved experiment; only the filter was estimated.`);
+  }
+
+  function renderMix() {
+    const m = st.work.mix;
+    for (const [c, v] of [[fel.noiseLevel, m.noise], [fel.voicedLevel, m.voiced]]) {
+      const p = Math.round(v * 100);
+      if (document.activeElement !== c.inp) c.inp.value = String(p);
+      c.out.textContent = `${p}%`;
+    }
+    fel.voicedDirect.checked = m.voicedDirect;
+    fel.noiseInfo.textContent = m.noise === 0 ? 'Noise is off, so the source is the same as before. Raise the noise level to add a hiss that the filter shapes like everything else.'
+      : m.voiced === 0 ? 'Noise only: the harmonics are off, and you hear the filter’s shape directly.'
+        : m.voicedDirect ? 'Noise through the filter, with the harmonics going around it.' : 'Noise and harmonics together, both through the filter.';
+  }
+
+  function renderFricatives() {
+    const w = st.work;
+    const loaded = w.origin === 'fricative' ? VF.FRICATIVES.find((x) => x.name === w.vowelText) : null;
+    for (const b of fel.fricBtns) b.setAttribute('aria-pressed', String(!!loaded && loaded.id === b.dataset.fricative));
+    fel.fricInfo.replaceChildren(
+      loaded ? h('p', {}, h('strong', {}, `Loaded: ${loaded.name} /${loaded.ipa}/, as in “${loaded.word}”. `),
+        `Preset, not estimated: filter shape, noise ${Math.round(w.mix.noise * 100)} %, harmonics ${Math.round(w.mix.voiced * 100)} %${w.mix.voicedDirect ? ', harmonics skipping the filter' : ''}. `,
+        loaded.id === 'jjj' ? `I read “jjj” as the voiced sound in “measure”. The harmonic part uses your f0 (${fmtHz(w.f0)}) and ${w.count} components. ` : '',
+        w.editedAfter ? 'You have edited it since loading.' : '') : '',
+      h('p', {}, 'Each button loads a starting point for the filter and the levels. Then drag the points and move the sliders until it sounds right to you. They are hand-chosen from the general pattern in the phonetics literature, not measured from a voice, and have not been checked by listening.'));
+    const f = st.fricFit;
+    if (!f) { fel.fricFitBox.replaceChildren(); return; }
+    if (!f.ok) {
+      fel.fricFitBox.replaceChildren(h('p', {}, h('span', { class: 'vl-auto-chip bad' }, '✗ No reliable result')), h('ul', { class: 'vl-auto-problems' }, f.problems.map((p) => h('li', {}, p))), h('p', { class: 'muted' }, 'Nothing was changed.'));
+      return;
+    }
+    const s = f.summary;
+    fel.fricFitBox.replaceChildren(
+      h('p', {}, h('span', { class: `vl-auto-chip ${s.rmsErrorDb < 3 ? 'good' : s.rmsErrorDb < 6 ? 'warn' : 'bad'}` }, `${s.rmsErrorDb} dB RMS`), ' ',
+        h('span', { class: 'muted' }, `Strongest near ${fmtHz(s.peakHz)}, section ${s.sectionSec[0]}–${s.sectionSec[1]} s of “${s.recordingName}”, ${s.measuredPoints} third-octave bands.`)),
+      f.warnings.length ? h('ul', { class: 'vl-auto-warnings' }, f.warnings.map((w) => h('li', {}, w))) : '',
+      h('p', {}, h('strong', {}, 'Estimated: '), 'the 8 filter points. ', h('strong', {}, 'Not estimated: '), `the noise level and the harmonic settings, which are defaults${f.voiced ? ' (turned on because the section sounded voiced)' : ''}. It opened as a new, unsaved experiment: compare with Original → Filtered and adjust by ear.`));
+  }
+
   // ───────────── playback ─────────────
   function guard() {
     if (isRecording()) return false;
@@ -763,7 +921,7 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
   const audioFilter = () => ({ ...st.work.filter, makeup: st.makeupOn ? st.makeup : 1 });
 
   function recomputeMakeup() {
-    st.makeup = st.makeupOn ? VF.makeupGain(st.work.f0, st.work.count, st.work.filter.bands, rate(), st.work.source === 'custom' ? comps() : null) : 1;
+    st.makeup = st.makeupOn ? VF.makeupGain(st.work.f0, st.work.count, st.work.filter.bands, rate(), st.work.source === 'custom' ? comps() : null, st.work.mix) : 1;
   }
 
   function setMakeup(on) {
@@ -791,9 +949,10 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
   function playSource(filtered) {
     if (!guard()) return;
     if (st.work.filter.enabled !== filtered) { st.work.filter.enabled = filtered; onFilterChange({ edited: false }); }
-    if (!VF.activeComponents(comps(), rate()).length) { logChange('Nothing to play: the source has no active components (add a row, or raise an amplitude above 0).'); return; }
-    audio.playSource(comps(), audioFilter());
-    const what = st.work.source === 'custom' ? 'your own components' : 'every harmonic at amplitude 1';
+    if (silent()) { logChange('Nothing to play: the source is silent (raise the noise or harmonic level, or add a component).'); return; }
+    audio.playSource(comps(), audioFilter(), {}, st.work.mix);
+    const sines = st.work.source === 'custom' ? 'your own components' : 'every harmonic at amplitude 1';
+    const what = st.work.mix.noise === 0 ? sines : st.work.mix.voiced === 0 ? 'noise only' : `${sines}, plus noise`;
     logChange(filtered ? `Playing the FILTERED source (${what}; until Stop; dragging changes it live).` : `Playing the UNFILTERED source (${what}), filter bypassed (until Stop).`);
   }
 
@@ -802,23 +961,28 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
     if (!r || !guard()) return;
     const { from, to } = segSamples(r);
     if (!st.work.filter.enabled) { st.work.filter.enabled = true; onFilterChange({ edited: false }); }
-    audio.playOriginalThenFiltered(r, comps(), audioFilter(), { from, to, levelMatch: st.matchOrig ? filteredPeak() : false });
+    audio.playOriginalThenFiltered(r, comps(), audioFilter(), { from, to, levelMatch: st.matchOrig ? filteredPeak() : false }, st.work.mix);
     logChange('Original → Filtered: the recording section, a short pause, then the filtered source for the same length.');
   }
 
   function updateTransport() {
     const r = isRecWf() ? rec() : null;
     const busy = isRecording();
-    const silent = !VF.activeComponents(comps(), rate()).length;
+    const mute = silent();
     fel.playOrig.disabled = !r || busy;
     fel.playAB.disabled = !r || busy;
-    fel.playDry.disabled = busy || silent;
-    fel.playWet.disabled = busy || silent;
-    fel.exPlay.disabled = busy || silent;
-    fel.exPlayDry.disabled = busy || silent;
+    fel.playDry.disabled = busy || mute;
+    fel.playWet.disabled = busy || mute;
+    fel.exPlay.disabled = busy || mute;
+    fel.exPlayDry.disabled = busy || mute;
+    fel.mixPlay.disabled = busy || mute;
+    fel.fricPlay.disabled = busy || mute;
+    fel.noisePlay.disabled = busy;
     fel.startBtn.disabled = busy;
     fel.stopBtn.disabled = !(audio.playing && st.owner);
     fel.exStop.disabled = fel.stopBtn.disabled;
+    fel.noiseStop.disabled = fel.stopBtn.disabled;
+    fel.fricStop.disabled = fel.stopBtn.disabled;
     const mine = st.owner && audio.playing;
     const synthLabel = audio.filteredNow ? 'FILTERED source' : 'UNFILTERED source (filter bypassed)';
     const label = !mine ? '○ Nothing playing here'
@@ -828,8 +992,10 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
     fel.nowPlaying.textContent = label;
     const what = !mine ? '' : audio.state === 'original' || audio.abPhase === 'original' ? 'orig' : audio.state === 'synth' ? (audio.filteredNow ? 'synth' : 'dry') : audio.abPhase === 'synth' ? 'synth' : '';
     fel.nowPlaying.className = 'vl-now ' + what;
-    fel.exNow.textContent = label;
-    fel.exNow.className = 'vl-now ' + what;
+    for (const x of [fel.exNow, fel.noiseNow, fel.fricNow]) {
+      x.textContent = label;
+      x.className = 'vl-now ' + what;
+    }
   }
 
   function updateLevelInfo() {
@@ -898,26 +1064,30 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
   // ───────────── rendering ─────────────
   function renderWorkflow() {
     const wf = st.work.workflow;
-    for (const t of [fel.tabExplore, fel.tabCustom, fel.tabRecording]) t.setAttribute('aria-pressed', String(t.dataset.wf === wf));
+    for (const t of [fel.tabExplore, fel.tabCustom, fel.tabRecording, fel.tabFricative]) t.setAttribute('aria-pressed', String(t.dataset.wf === wf));
     fel.workflowHint.textContent = {
       explore: 'Workflow 1: equal-strength harmonics from a fundamental you type, shaped by vowel example filters or by dragging. No microphone or recording is used.',
       custom: 'Workflow 2: your own sine components (any frequencies and amplitudes) through the same filter. No microphone or recording is used, and your rows are never changed by the filter.',
       recording: 'Workflow 3: compare with a recorded vowel, estimate its fundamental, and fit the filter to it automatically. Uses equal-strength harmonics.',
+      fricative: 'Workflow 4: make “shh”, “fff”, “jjj” and “sss” from filtered noise. Start from a preset, then adjust the filter and levels by ear. A recording is optional and only used for the estimate and for comparing.',
     }[wf];
-    fel.recPanel.hidden = wf !== 'recording';
+    const withRec = isRecWf();
+    fel.recPanel.hidden = !withRec;
     fel.matchBox.hidden = wf !== 'recording';
+    fel.exampleBox.hidden = wf === 'fricative';
+    fel.fricBox.hidden = wf !== 'fricative';
     fel.examplePanel.classList.toggle('single', wf !== 'recording');
     fel.harmBox.hidden = st.work.source !== 'harmonics';
     fel.customBox.hidden = st.work.source !== 'custom';
     fel.srcHarm.checked = st.work.source === 'harmonics';
     fel.srcCustom.checked = st.work.source === 'custom';
     fel.srcHarm.disabled = false;
-    fel.srcCustom.disabled = wf === 'recording';
-    fel.sourceNote.textContent = wf === 'recording' ? 'Recording matching uses equal-strength harmonics (choose workflow 2 for your own frequencies).' : '';
-    for (const x of fel.listenOrigBits) x.hidden = wf !== 'recording';
-    fel.matchOrigLabel.hidden = wf !== 'recording';
-    fel.origLegend.hidden = wf !== 'recording';
-    fel.dlOrig.hidden = wf !== 'recording';
+    fel.srcCustom.disabled = withRec;
+    fel.sourceNote.textContent = wf === 'recording' ? 'Recording matching uses equal-strength harmonics (choose workflow 2 for your own frequencies).' : wf === 'fricative' ? 'The harmonic part of a fricative uses equal-strength harmonics.' : '';
+    for (const x of fel.listenOrigBits) x.hidden = !withRec;
+    fel.matchOrigLabel.hidden = !withRec;
+    fel.origLegend.hidden = !withRec;
+    fel.dlOrig.hidden = !withRec;
     (wf === 'recording' ? fel.recLabelSlot : fel.saveLabelSlot).append(fel.labelRow);
   }
 
@@ -978,6 +1148,8 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
     renderBands();
     renderExamples();
     renderFit();
+    renderMix();
+    renderFricatives();
     renderViewButtons();
     updateTransport();
     updateLevelInfo();
@@ -1004,6 +1176,7 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
     fel.useLabSeg.disabled = !openExperiment() || !openExperiment().recordingId;
     fel.midSeg.disabled = !rec();
     fel.matchBtn.disabled = !rec() || !isRecWf();
+    fel.fricEstimate.disabled = !rec();
     fel.estimate.disabled = !rec();
     updateTransport();
     updateDownloads();
@@ -1200,7 +1373,7 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
       origSpec = { db: M.relativeToMax(s.db, s.binHz).db, binHz: s.binHz };
     }
     if (!r) origSpec = null;
-    if (specDirty && !VF.activeComponents(comps(), rate()).length) {
+    if (specDirty && silent()) {
       wetSpec = null;
       drySpec = null;
       specDirty = false;
@@ -1233,10 +1406,10 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
     const r = isRecWf() ? rec() : null;
     if (r) overview.render({ rec: r, seg: r ? st.work.segment : null, playhead: st.owner ? ph : null, message: ['No recording selected', 'Choose one above, or record / import in stage 1.'] });
     const view = { min: 0, max: Math.min(st.range, sr / 2), log: st.log };
-    respView.render({ ...view, bands: st.work.filter.bands, enabled: st.work.filter.enabled, selected: st.selected, sampleRate: sr, components: comps(),
+    respView.render({ ...view, bands: st.work.filter.bands, enabled: st.work.filter.enabled, selected: st.selected, sampleRate: sr, components: shownComps(),
       formants: st.work.origin === 'example' && st.work.example ? st.work.example.formants : null, dragging: !!st.dragging });
     const ro = specView.render({ ...view, orig: isRecWf() ? origSpec : null, filtered: st.work.filter.enabled ? wetSpec : null, unfiltered: st.showUnfiltered || !st.work.filter.enabled ? drySpec : null,
-      marks: VF.activeComponents(comps(), sr).map((c) => c.freq), nyquist: sr / 2, hoverX: st.hover,
+      marks: VF.activeComponents(shownComps(), sr).map((c) => c.freq), nyquist: sr / 2, hoverX: st.hover,
       message: ['Silent source', 'Add a component or raise an amplitude above 0.'] });
     const fmt = (v) => (v == null ? '—' : `${v.toFixed(1)} dB`);
     const harmNo = st.work.source === 'harmonics' && ro ? ` (≈ harmonic ${(ro.freq / st.work.f0).toFixed(2)})` : '';
@@ -1280,7 +1453,7 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
     },
     debug() {
       return {
-        work: clone(st.work), components: comps(), dirty: isDirty(), makeupDb: 20 * Math.log10(st.makeupOn ? st.makeup : 1), saved: st.saved.map(clone), selected: st.selected, rate: rate(),
+        work: clone(st.work), components: comps(), fricFit: st.fricFit ? clone(st.fricFit) : null, dirty: isDirty(), makeupDb: 20 * Math.log10(st.makeupOn ? st.makeup : 1), saved: st.saved.map(clone), selected: st.selected, rate: rate(),
         audio: audio.debugInfo(), owner: st.owner, filteredNow: audio.filteredNow,
         fit: st.fit ? { ok: st.fit.ok, summary: st.fit.summary || null, problems: st.fit.problems || [] } : null,
         storage: { ...st.storage }, nowPlaying: fel.nowPlaying.textContent,
@@ -1292,7 +1465,7 @@ export function createFilterSection({ help, getRecordings, recById, openExperime
       componentGains: () => VF.componentGains(comps(), st.work.filter.bands, rate()),
       modelResponse: (freqs) => Array.from(VF.responseDb(st.work.filter.bands, freqs, rate())),
       liveResponse: (freqs) => audio.liveResponseDb(freqs),
-      renderOffline: async (seconds = 0.5) => Array.from(await renderOffline({ components: comps(), bands: st.work.filter.bands, enabled: true, sampleRate: rate(), duration: seconds, makeup: st.makeupOn ? st.makeup : 1 })),
+      renderOffline: async (seconds = 0.5) => Array.from(await renderOffline({ components: comps(), bands: st.work.filter.bands, enabled: true, sampleRate: rate(), duration: seconds, makeup: st.makeupOn ? st.makeup : 1, mix: st.work.mix })),
       renderModel: (seconds = 0.5) => Array.from(VF.renderFiltered({ ...srcArgs(), bands: st.work.filter.bands, enabled: true, sampleRate: rate(), duration: seconds, makeup: st.makeupOn ? st.makeup : 1 })),
       handles: () => { const r = fel.filterCanvas.getBoundingClientRect(); return respView.handles.map((p) => ({ x: r.left + p.x, y: r.top + p.y })); },
       tourTargetRect: () => tour.targetRect(),
