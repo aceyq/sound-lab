@@ -3,24 +3,22 @@
 **Student:** Acelynn (Ace) Qiao
 **Repository:** https://github.com/aceyq/sound-lab
 **Live site:** https://aceyq.github.io/sound-lab/
-**AI tool:** Claude (Anthropic), used as Claude Code through Claude chats and project threads. ChatGPT helped me draft the November 6 prompt; that is noted where it is quoted.
 
-This file is organized by app and major feature, in the order I built them. Each section quotes the main prompts I sent to build or substantially change that feature, word for word (long prompts are collapsed; click to expand). It then summarizes what Claude implemented and how the code was tested. The test results are the ones Claude reported. Unless a section says otherwise, they come from automated checks that used synthetic signals, a simulated microphone or a simulated phone, and none of them involve listening. Dates are UTC.
+## How I worked
 
-## Summary of contributions
+I built every app this quarter with Claude (Anthropic), mostly through Claude Code running on my Mac. For each assignment, I started from Professor Minces's instructions and wrote a detailed prompt. It said what the app should do, how the controls should behave, what to explain to the user, and how to check that it worked. Claude wrote the code, tests and update guides. I tried the results, then sent feedback and follow-up prompts to steer the revisions. I did not edit the code by hand.
 
-**My part:** I turned Professor Minces's assignments into detailed written requirements for each feature, as the prompts below show, and made the scope and design decisions in them. I tested features on my own hardware and by ear, recorded the demo videos and presented the work.
+ChatGPT helped me word some of my later prompts. I did not use ChatGPT to draft the Oct 5–6 Harmonic Explorer prompt.
 
-**Claude's part:** Claude wrote the application code, unit tests, browser verification scripts, README sections and update guides (`*_UPDATE.md`). It ran the automated checks and production builds, and it explained the signal-processing methods with sources.
+Below, each app or feature starts with my main build prompt, quoted exactly. Long prompts are collapsed, so click to expand them. After the prompt, I explain what I wanted, what I clarified or changed along the way, what Claude built, and how it was tested. Most automated checks used synthetic sounds or a simulated microphone or phone, so they don't replace listening. I say where I tested something myself.
 
-**Commits:** every commit shows my Git identity, because they were all made on my Mac with my Git configuration. Claude ran the commits and pushes for most updates through Claude Code sessions on my Mac. I ran two myself in Terminal, `76b3ed7` (Vowel Morph) and `b4ca719` (Vowel filtering), because Claude Code's permission check blocked Claude's own `git commit`. Claude wrote the code in both.
+Every commit in the repository shows my Git identity, because the commits were made on my Mac. Claude ran most of them through Claude Code. I ran two in Terminal myself, Vowel Morph (`76b3ed7`) and Vowel filtering (`b4ca719`), because Claude Code's permission check blocked Claude from committing.
 
 ## Week 2 — Harmonic Explorer (Oct 5–6, 2026)
 
-**Tool:** Claude, in my DSC180A Web App chat.
-
 ### Main build prompt (verbatim, sent Oct 5, 2026)
-I attached a screenshot of my professor's app as a visual reference (the image itself isn't reproduced here).
+
+I attached a screenshot of my professor's app as a visual reference. The image isn't reproduced here.
 
 <details><summary>Full prompt</summary>
 
@@ -203,31 +201,23 @@ Please complete the implementation, run it, and launch it now.
 ```
 </details>
 
-### What I specified
-All of the requirements above came from me: the tech stack, value ranges and defaults, the 10 harmonics, the PeriodicWave approach, normalization with a common factor, a real AnalyserNode FFT instead of decorative bars, the presets, the layout, the explanatory text, and the verification checklist.
+### What I wanted
+
+I wanted a simple synthesizer that shows how a fundamental and its harmonics add up to one sound. I set the requirements in the prompt:
+- A 50–1000 Hz fundamental, defaulting to 220 Hz.
+- Ten harmonic amplitude sliders, each showing its frequency (n × f₀).
+- A waveform calculated from the same numbers as the audio.
+- A spectrum measured with a real FFT, not decorative bars drawn from the slider values.
+- One shared normalization factor, so preventing clipping wouldn't change the balance between harmonics.
+- Presets labelled as approximations, because there are only 10 harmonics.
 
 ### What Claude built
-Claude wrote all of the code:
-- **Vite + vanilla JS app:** `index.html`, `src/main.js`, `src/audio.js`, `src/synthesis.js`, `src/plots.js` and `src/style.css`.
-- **Sound:** additive synthesis with a Web Audio PeriodicWave, scaled by a common normalization factor g that the page displays.
-- **Plots:** a canvas waveform that uses the same g as the audio, and a live FFT spectrum from an AnalyserNode with color-matched harmonic markers.
-- **Controls:** presets, Reset, master volume, fades and input validation.
-- **Docs and delivery:** the README and a published playable version.
 
-I did not edit any of the code by hand. The code is in a separate folder on my Mac, `~/Desktop/harmonic-explorer`. It is not part of the `sound-lab` repository.
+Claude wrote the whole Vite and vanilla JavaScript app. Sound comes from one Web Audio `PeriodicWave` scaled by a normalization factor g, which the page displays. The waveform plot uses the same g, and the spectrum is read live from an `AnalyserNode`. Claude also added presets, Reset, master volume, fades, input validation, a README and a published copy. The code lives in a separate folder, `~/Desktop/harmonic-explorer`, and isn't part of this repository.
 
 ### How it was tested
-Claude reported 19 of 19 checks passing in headless Chromium against the dev server, the production build and the published page:
-1. A 220 Hz sine gave an FFT peak at 221 Hz, within one bin of about 2.7 Hz.
-2. Turning up H2 added a peak at 439 Hz.
-3. At 300 Hz the labels read 300–3000 Hz, and the sawtooth-like preset peaked at all 10 multiples.
-4. With every amplitude at zero there were no peaks and the waveform was flat.
-5. The presets set the right slider values. Square-like peaked only at odd multiples. Sawtooth-like was scaled by g = 0.59.
-6. Five Play clicks started one audio source and one animation loop, and repeated Play/Stop left no sources behind.
-7. The plots sat side by side at 1440 px and stacked at 390 px.
-8. `npm run build` succeeded.
 
-Claude also reported checking number validation, keyboard control of the sliders and Reset, and seeing no app console errors apart from a blocked Google Font. The test script was not saved, so these results can't be re-run and rest only on Claude's report.
+Claude reported 19 of 19 automated browser checks passing. For example, a 220 Hz sine peaked at 221 Hz, within one FFT bin. Adding H2 added a peak near 440 Hz. Square-like peaked only at odd multiples, and repeated Play clicks never started a second sound. The test script wasn't saved, so these results rest on Claude's report.
 
 ## Frequency Playground (Project 1, October 13)
 
@@ -430,258 +420,28 @@ Claude also reported checking number validation, keyboard control of the sliders
 
 </details>
 
-### What Claude implemented
+### What I wanted
 
-A new Vite app with an editable table of up to 16 sine components, an additive-synthesis audio engine with shared normalization, a waveform plot with time-window and amplitude-scale controls, a measured FFT spectrum, a spectrogram, presets (pure tone, harmonic family, non-harmonic mixture, beats, randomize), a harmonic builder, eight guided experiments, a glossary, Presentation Mode and the README. This repository started from this app.
+My earlier synthesizer worked, but I didn't fully understand its controls. So I wanted an app where I could type any frequencies and amplitudes, not just multiples of one base, and see how they look and sound. The main pieces I asked for:
+- Waveform time windows from 5 ms to 5 seconds, so I could zoom out to see beats.
+- A spectrum and spectrogram measured from the actual audio.
+- Presets for a pure tone, a harmonic family, a non-harmonic mixture and beats.
+- Plain-language explanations for every control, so I could present it the next day.
+
+### What Claude built
+
+Claude built a new Vite app. It has an editable table of up to 16 sine components, an additive audio engine with shared normalization, and a waveform plot with time-window and amplitude-scale controls. It also measures an FFT spectrum and a spectrogram, and it has presets, a harmonic builder, guided experiments, a glossary and Presentation Mode. This repository grew out of this app.
 
 ### How it was tested
 
-| Check | Result |
-|---|---|
-| Unit tests | 10 pass |
-| `scripts/verify.mjs` (headless Chromium, real audio engine) | 36/36 pass: typed values change the oscillators, measured peaks land on the expected frequencies within one FFT bin, display scaling leaves the audio unchanged, silence and Play/Stop cleanup behave correctly, and the app works under a GitHub Pages sub-path |
-| Production build | Succeeded |
+Claude ran 10 unit tests and 36 browser checks in headless Chromium, and all passed. The checks confirmed that typed values change the actual sound, that measured peaks land on the expected frequencies, and that zooming the display doesn't change the audio. The production build also succeeded.
 
 ## Motion Score (Project 2, October 13–19)
 
-Project 2 started as Air Canvas, a hand-tracking instrument. Claude built it on October 13, and Motion Score replaced it the same day. Air Canvas is not in the current app.
-
-### Main prompts
+### Main build prompt
 
 <details>
-<summary>Air Canvas build prompt (verbatim, October 13)</summary>
-
-> Implement Project 2 within the existing app, on the separate “Air Canvas” page. Preserve Frequency Playground and its behavior.
-> PROJECT ASSIGNMENT
-> “Get creative: control sound, such as fundamental frequency or number of harmonics, with some gesture—for example, body positions from the laptop camera or an accelerometer.”
-> I am a dancer and want a creative, understandable instrument I can demonstrate tomorrow over Zoom.
-> CONCEPT: AIR CANVAS — PAINT SOUND WITH MOVEMENT
-> Turn one tracked hand into an expressive instrument:
->
-> * Hand height controls fundamental frequency.
-> * Horizontal hand position controls harmonic richness.
-> * Thumb–index separation controls the sound’s strength.
-> * Hand movement leaves a colorful trail.
-> * A live spectrogram records the resulting sound as a visual musical drawing.
->
-> The camera tracking must actually control the audio. Decorative animations alone do not satisfy the assignment.
-> Use the attached professor screenshots as references for visible joint tracking, clear gesture feedback, and spectrogram visualization. This app has its own movement-and-sound concept; it does not need to reproduce a vocal-tract simulation.
-> Prioritize reliable core functionality and a polished presentation over extra effects.
->
-> 1. REAL CAMERA HAND TRACKING
->
-> Use MediaPipe Hand Landmarker for browser-based tracking, following its current official documentation.
-> Requirements:
->
-> * Explicit Enable Camera action.
-> * Track one hand locally in the browser.
-> * Mirrored camera preview with correctly aligned landmark overlay.
-> * Visible joint circles and connecting lines.
-> * Highlight the palm position and thumb/index tips used by the mappings.
-> * Clear model-loading, camera-ready, hand-detected, and tracking-lost states.
-> * Helpful camera-denied and model-load failure messages.
-> * No microphone recording or server upload of camera frames.
->
-> Keep model, WASM, and package versions compatible. Ensure asset paths work under a GitHub Pages repository subpath. State any internet dependency for initial model loading; do not claim offline support unless implemented and tested.
-> Throttle inference appropriately so audio and animation stay responsive. Clean up camera tracks, model resources, and loops when leaving the page.
->
-> 2. SIMPLE, EXPLICIT GESTURE MAPPINGS
->
-> Use one hand so the demo works while seated at a laptop.
-> A. Palm height → pitch
->
-> * Higher on the preview means a higher fundamental.
-> * Lower means a lower fundamental.
-> * Map to approximately 110–880 Hz using perceptually sensible logarithmic frequency mapping.
-> * Show live Hz and approximate note name.
->
-> B. Palm horizontal position → harmonic richness
->
-> * Left means fewer harmonics and a simpler tone.
-> * Right means more harmonics and a richer tone.
-> * Map across 1–12 harmonic components.
-> * Show the live harmonic count.
-> * Define harmonic frequencies as n × fundamental.
-> * Use decreasing amplitudes such as 1/n with common normalization.
->
-> Implement the mapping in mirrored screen coordinates, so moving toward the visible right produces the stated effect.
-> C. Thumb–index opening → expression level
->
-> * Fingers together: fade to silence.
-> * Wider opening: stronger sound.
-> * Normalize the distance by a stable palm-size measure to reduce sensitivity to camera distance.
-> * Clamp the result and smooth it.
-> * Add a small closed-pinch dead zone.
-> * Display the detected opening and mapped expression level.
->
-> Expression Level scales the entire synthesized mixture before a separate master-volume control. Do not call it a harmonic amplitude slider.
-> Use smoothing, short gain ramps, and hysteresis around discrete harmonic-count boundaries so hand jitter does not create rapid switching.
-> Explain each mapping with a visible diagram or compact legend. Keep the number of primary mappings to these three.
->
-> 3. CALIBRATION AND TRACKING LOSS
->
-> Provide a simple optional calibration flow for comfortable palm position and pinch range. Clearly say which mappings are calibrated and which use screen-based defaults.
-> If calibration is skipped, use reasonable defaults.
-> If tracking is lost or confidence becomes inadequate:
->
-> * Fade audio to silence promptly.
-> * Stop adding trails.
-> * Show “Hand not detected — sound paused.”
-> * Resume smoothly after reliable tracking returns.
->
-> Never sustain an uncontrolled note after the hand leaves the frame.
->
-> 4. AUDIO ENGINE
->
-> Use Web Audio additive synthesis with phase-consistent harmonic components.
-> Provide:
->
-> * Start Audio.
-> * Stop Audio.
-> * Master Volume with a low default.
-> * A prominent Mute / Panic button that immediately silences output and leaves it muted until explicitly restarted.
->
-> Camera permission and audio activation are separate actions, each clearly explained.
-> Avoid clipping through common normalization. Exclude harmonics at or above Nyquist. Smooth changes in pitch, expression level, and harmonic gains.
-> Use the same audio signal for the live spectrum and spectrogram. Clearly identify the measurement point.
->
-> 5. CREATIVE VISUAL PERFORMANCE
->
-> Create a polished dark performance canvas with readable controls and colorful motion trails.
-> Use consistent visual mappings:
->
-> * Trail color corresponds to pitch, with a small legend.
-> * Trail width corresponds to harmonic richness.
-> * Trail opacity corresponds to expression level.
-> * Do not draw new strokes when expression is zero or tracking is lost.
->
-> Make clear that the trail is a gesture visualization, not a waveform or spectrogram.
-> Display:
->
-> * Mirrored camera preview with landmarks.
-> * A large motion-art canvas.
-> * Live parameter cards for fundamental Hz, harmonic count, and expression level.
-> * A real rolling spectrogram of the generated sound.
-> * An expandable short-window waveform and current spectrum.
->
-> Spectrogram:
->
-> * Time horizontal, newest data at the right.
-> * Frequency vertical.
-> * Color intensity represents measured magnitude.
-> * Visible axes and color legend.
-> * Approximately 10 seconds of history, advancing according to elapsed time.
->
-> Include an optional Freeze Visuals control that explicitly freezes only visual history, not sound. Label the frozen state unmistakably.
-> Include Clear Trails and Clear Spectrogram as separate, clearly explained actions.
->
-> 6. CONTINUOUS AND MUSICAL MODES
->
-> Include two pitch modes:
->
-> * Continuous: smooth pitch slides, useful for understanding frequency.
-> * Pentatonic: snap pitch to a clearly specified pentatonic scale over the available range.
->
-> Explain:
-> “Continuous mode allows intermediate frequencies. Pentatonic mode selects nearby notes from a five-note scale.”
-> Use hysteresis or stable note selection to prevent flickering between nearby notes.
-> Default to Continuous for learning; allow Pentatonic for a short performance.
-> Do not add other sound effects until the three gesture mappings work reliably.
->
-> 7. HONEST FALLBACK FOR PRESENTATION
->
-> Provide an explicitly labeled Mouse Demo mode in case the webcam, model download, or camera sharing fails.
-> In Mouse Demo:
->
-> * Pointer height maps to pitch.
-> * Pointer horizontal position maps to harmonic count.
-> * Holding the pointer button produces sound at a defined expression level; releasing fades to silence.
-> * Leaving the canvas or losing window focus silences the sound.
->
-> Show a persistent “Mouse Demo — camera tracking is off” badge. Never present simulated tracking as real camera tracking.
-> Camera mode remains the primary project and must genuinely work.
->
-> 8. EXPLANATIONS AND PRESENTATION MODE
->
-> Add brief plain-language help:
->
-> * What the landmark tracker estimates.
-> * How each movement maps to a parameter.
-> * Why harmonic count changes timbre.
-> * How waveform, spectrum, spectrogram, and gesture trails differ.
-> * Why smoothing and normalization are used.
->
-> State that this uses a pretrained landmark detector plus explicitly programmed sound mappings. Do not imply I trained a new model to learn gesture-to-sound relationships.
-> Create a Presentation Mode with:
->
-> * Large visual area.
-> * Readable live parameter values.
-> * A compact gesture legend.
-> * Essential start/stop/mute controls.
-> * Minimal secondary settings.
->
-> Include a guided demonstration:
->
-> 1. Hold a nearly closed pinch: silence.
-> 2. Open the pinch: sound fades in.
-> 3. Move upward while keeping horizontal position stable: pitch rises.
-> 4. Move left/right while keeping height stable: harmonic richness changes.
-> 5. Trace a slow shape: the gesture trail draws the motion while the spectrogram shows the changing sound.
-> 6. Close the pinch or remove the hand: sound fades out.
->
-> Provide a suggested 30-second musical performance in Pentatonic mode.
->
-> 9. HOSTING AND ZOOM READINESS
->
-> Both project pages must work locally and be ready for GitHub Pages.
-> Prepare:
->
-> * A correct production build.
-> * A GitHub Pages deployment workflow or appropriate deployment instructions.
-> * Correct base paths for scripts, model assets, and WASM.
-> * Navigation that works when the deployed URL is opened directly.
-> * HTTPS camera requirements and localhost instructions.
-> * Clear instructions for any repository-specific setting still needed.
->
-> Inspect existing git configuration before making repository assumptions. If an intended repository is already identified and publishing is authorized, deploy there. Otherwise provide the exact remaining setup steps rather than inventing a public URL.
-> Include Zoom presentation instructions:
->
-> * Share the app window/screen.
-> * Enable Share Sound so participants hear synthesized audio.
-> * Test the browser camera with Zoom before the presentation.
-> * If there is camera contention, try disabling Zoom video and letting the app use the webcam.
-> * Keep Mouse Demo available as the explicit fallback.
->
-> 10. VERIFY AND HAND OFF
->
-> Verify:
->
-> * Real camera tracking drives all three intended parameters.
-> * Mirroring and landmark alignment are correct.
-> * Moving only one axis mainly changes its assigned parameter.
-> * Tracking loss and closed pinch silence output.
-> * Harmonic gains and pitch changes are smooth.
-> * Camera denial and model-loading failures are handled.
-> * Mouse Demo works and is honestly labeled.
-> * Page switching stops audio and camera resources.
-> * Both project pages still work.
-> * Production build and base-path behavior are checked.
->
-> Do not claim physical-camera or listening tests were performed if the environment does not allow them. Provide a short manual test checklist.
-> Extend PRESENTATION_NOTES.md with:
->
-> * A 2–3 minute explanation of Air Canvas.
-> * What each button and mapping does.
-> * A 30-second performance sequence.
-> * Likely questions and accurate answers.
-> * Limitations, including sensitivity to lighting, occlusion, and hand position.
->
-> Run and launch the completed app. Give me its local URL, any verified hosted URL, and precise instructions for reopening it.
-
-</details>
-
-<details>
-<summary>Motion Score build prompt, replacing Air Canvas (verbatim, October 13)</summary>
+<summary>Motion Score build prompt (verbatim, October 13)</summary>
 
 > Implement a complete replacement for Project 2 in my existing sound-wave app.
 > Inspect the existing repository, framework, scripts, routing, audio implementation, git status, and git remotes before making changes. Read applicable project instructions. Preserve Project 1, “Frequency Playground,” and its existing behavior.
@@ -1364,19 +1124,263 @@ Project 2 started as Air Canvas, a hand-tracking instrument. Claude built it on 
 
 </details>
 
-Pairing change (verbatim, October 13):
+### What I wanted
+
+My first idea for Project 2 was Air Canvas, a hand-tracking instrument. Claude built it, but I replaced it the same day with Motion Score. In Motion Score my phone is the controller: its motion and orientation sensors stream to my laptop, and the laptop turns them into sound.
+
+<details>
+<summary>Air Canvas prompt, later replaced (verbatim, October 13)</summary>
+
+> Implement Project 2 within the existing app, on the separate “Air Canvas” page. Preserve Frequency Playground and its behavior.
+> PROJECT ASSIGNMENT
+> “Get creative: control sound, such as fundamental frequency or number of harmonics, with some gesture—for example, body positions from the laptop camera or an accelerometer.”
+> I am a dancer and want a creative, understandable instrument I can demonstrate tomorrow over Zoom.
+> CONCEPT: AIR CANVAS — PAINT SOUND WITH MOVEMENT
+> Turn one tracked hand into an expressive instrument:
+>
+> * Hand height controls fundamental frequency.
+> * Horizontal hand position controls harmonic richness.
+> * Thumb–index separation controls the sound’s strength.
+> * Hand movement leaves a colorful trail.
+> * A live spectrogram records the resulting sound as a visual musical drawing.
+>
+> The camera tracking must actually control the audio. Decorative animations alone do not satisfy the assignment.
+> Use the attached professor screenshots as references for visible joint tracking, clear gesture feedback, and spectrogram visualization. This app has its own movement-and-sound concept; it does not need to reproduce a vocal-tract simulation.
+> Prioritize reliable core functionality and a polished presentation over extra effects.
+>
+> 1. REAL CAMERA HAND TRACKING
+>
+> Use MediaPipe Hand Landmarker for browser-based tracking, following its current official documentation.
+> Requirements:
+>
+> * Explicit Enable Camera action.
+> * Track one hand locally in the browser.
+> * Mirrored camera preview with correctly aligned landmark overlay.
+> * Visible joint circles and connecting lines.
+> * Highlight the palm position and thumb/index tips used by the mappings.
+> * Clear model-loading, camera-ready, hand-detected, and tracking-lost states.
+> * Helpful camera-denied and model-load failure messages.
+> * No microphone recording or server upload of camera frames.
+>
+> Keep model, WASM, and package versions compatible. Ensure asset paths work under a GitHub Pages repository subpath. State any internet dependency for initial model loading; do not claim offline support unless implemented and tested.
+> Throttle inference appropriately so audio and animation stay responsive. Clean up camera tracks, model resources, and loops when leaving the page.
+>
+> 2. SIMPLE, EXPLICIT GESTURE MAPPINGS
+>
+> Use one hand so the demo works while seated at a laptop.
+> A. Palm height → pitch
+>
+> * Higher on the preview means a higher fundamental.
+> * Lower means a lower fundamental.
+> * Map to approximately 110–880 Hz using perceptually sensible logarithmic frequency mapping.
+> * Show live Hz and approximate note name.
+>
+> B. Palm horizontal position → harmonic richness
+>
+> * Left means fewer harmonics and a simpler tone.
+> * Right means more harmonics and a richer tone.
+> * Map across 1–12 harmonic components.
+> * Show the live harmonic count.
+> * Define harmonic frequencies as n × fundamental.
+> * Use decreasing amplitudes such as 1/n with common normalization.
+>
+> Implement the mapping in mirrored screen coordinates, so moving toward the visible right produces the stated effect.
+> C. Thumb–index opening → expression level
+>
+> * Fingers together: fade to silence.
+> * Wider opening: stronger sound.
+> * Normalize the distance by a stable palm-size measure to reduce sensitivity to camera distance.
+> * Clamp the result and smooth it.
+> * Add a small closed-pinch dead zone.
+> * Display the detected opening and mapped expression level.
+>
+> Expression Level scales the entire synthesized mixture before a separate master-volume control. Do not call it a harmonic amplitude slider.
+> Use smoothing, short gain ramps, and hysteresis around discrete harmonic-count boundaries so hand jitter does not create rapid switching.
+> Explain each mapping with a visible diagram or compact legend. Keep the number of primary mappings to these three.
+>
+> 3. CALIBRATION AND TRACKING LOSS
+>
+> Provide a simple optional calibration flow for comfortable palm position and pinch range. Clearly say which mappings are calibrated and which use screen-based defaults.
+> If calibration is skipped, use reasonable defaults.
+> If tracking is lost or confidence becomes inadequate:
+>
+> * Fade audio to silence promptly.
+> * Stop adding trails.
+> * Show “Hand not detected — sound paused.”
+> * Resume smoothly after reliable tracking returns.
+>
+> Never sustain an uncontrolled note after the hand leaves the frame.
+>
+> 4. AUDIO ENGINE
+>
+> Use Web Audio additive synthesis with phase-consistent harmonic components.
+> Provide:
+>
+> * Start Audio.
+> * Stop Audio.
+> * Master Volume with a low default.
+> * A prominent Mute / Panic button that immediately silences output and leaves it muted until explicitly restarted.
+>
+> Camera permission and audio activation are separate actions, each clearly explained.
+> Avoid clipping through common normalization. Exclude harmonics at or above Nyquist. Smooth changes in pitch, expression level, and harmonic gains.
+> Use the same audio signal for the live spectrum and spectrogram. Clearly identify the measurement point.
+>
+> 5. CREATIVE VISUAL PERFORMANCE
+>
+> Create a polished dark performance canvas with readable controls and colorful motion trails.
+> Use consistent visual mappings:
+>
+> * Trail color corresponds to pitch, with a small legend.
+> * Trail width corresponds to harmonic richness.
+> * Trail opacity corresponds to expression level.
+> * Do not draw new strokes when expression is zero or tracking is lost.
+>
+> Make clear that the trail is a gesture visualization, not a waveform or spectrogram.
+> Display:
+>
+> * Mirrored camera preview with landmarks.
+> * A large motion-art canvas.
+> * Live parameter cards for fundamental Hz, harmonic count, and expression level.
+> * A real rolling spectrogram of the generated sound.
+> * An expandable short-window waveform and current spectrum.
+>
+> Spectrogram:
+>
+> * Time horizontal, newest data at the right.
+> * Frequency vertical.
+> * Color intensity represents measured magnitude.
+> * Visible axes and color legend.
+> * Approximately 10 seconds of history, advancing according to elapsed time.
+>
+> Include an optional Freeze Visuals control that explicitly freezes only visual history, not sound. Label the frozen state unmistakably.
+> Include Clear Trails and Clear Spectrogram as separate, clearly explained actions.
+>
+> 6. CONTINUOUS AND MUSICAL MODES
+>
+> Include two pitch modes:
+>
+> * Continuous: smooth pitch slides, useful for understanding frequency.
+> * Pentatonic: snap pitch to a clearly specified pentatonic scale over the available range.
+>
+> Explain:
+> “Continuous mode allows intermediate frequencies. Pentatonic mode selects nearby notes from a five-note scale.”
+> Use hysteresis or stable note selection to prevent flickering between nearby notes.
+> Default to Continuous for learning; allow Pentatonic for a short performance.
+> Do not add other sound effects until the three gesture mappings work reliably.
+>
+> 7. HONEST FALLBACK FOR PRESENTATION
+>
+> Provide an explicitly labeled Mouse Demo mode in case the webcam, model download, or camera sharing fails.
+> In Mouse Demo:
+>
+> * Pointer height maps to pitch.
+> * Pointer horizontal position maps to harmonic count.
+> * Holding the pointer button produces sound at a defined expression level; releasing fades to silence.
+> * Leaving the canvas or losing window focus silences the sound.
+>
+> Show a persistent “Mouse Demo — camera tracking is off” badge. Never present simulated tracking as real camera tracking.
+> Camera mode remains the primary project and must genuinely work.
+>
+> 8. EXPLANATIONS AND PRESENTATION MODE
+>
+> Add brief plain-language help:
+>
+> * What the landmark tracker estimates.
+> * How each movement maps to a parameter.
+> * Why harmonic count changes timbre.
+> * How waveform, spectrum, spectrogram, and gesture trails differ.
+> * Why smoothing and normalization are used.
+>
+> State that this uses a pretrained landmark detector plus explicitly programmed sound mappings. Do not imply I trained a new model to learn gesture-to-sound relationships.
+> Create a Presentation Mode with:
+>
+> * Large visual area.
+> * Readable live parameter values.
+> * A compact gesture legend.
+> * Essential start/stop/mute controls.
+> * Minimal secondary settings.
+>
+> Include a guided demonstration:
+>
+> 1. Hold a nearly closed pinch: silence.
+> 2. Open the pinch: sound fades in.
+> 3. Move upward while keeping horizontal position stable: pitch rises.
+> 4. Move left/right while keeping height stable: harmonic richness changes.
+> 5. Trace a slow shape: the gesture trail draws the motion while the spectrogram shows the changing sound.
+> 6. Close the pinch or remove the hand: sound fades out.
+>
+> Provide a suggested 30-second musical performance in Pentatonic mode.
+>
+> 9. HOSTING AND ZOOM READINESS
+>
+> Both project pages must work locally and be ready for GitHub Pages.
+> Prepare:
+>
+> * A correct production build.
+> * A GitHub Pages deployment workflow or appropriate deployment instructions.
+> * Correct base paths for scripts, model assets, and WASM.
+> * Navigation that works when the deployed URL is opened directly.
+> * HTTPS camera requirements and localhost instructions.
+> * Clear instructions for any repository-specific setting still needed.
+>
+> Inspect existing git configuration before making repository assumptions. If an intended repository is already identified and publishing is authorized, deploy there. Otherwise provide the exact remaining setup steps rather than inventing a public URL.
+> Include Zoom presentation instructions:
+>
+> * Share the app window/screen.
+> * Enable Share Sound so participants hear synthesized audio.
+> * Test the browser camera with Zoom before the presentation.
+> * If there is camera contention, try disabling Zoom video and letting the app use the webcam.
+> * Keep Mouse Demo available as the explicit fallback.
+>
+> 10. VERIFY AND HAND OFF
+>
+> Verify:
+>
+> * Real camera tracking drives all three intended parameters.
+> * Mirroring and landmark alignment are correct.
+> * Moving only one axis mainly changes its assigned parameter.
+> * Tracking loss and closed pinch silence output.
+> * Harmonic gains and pitch changes are smooth.
+> * Camera denial and model-loading failures are handled.
+> * Mouse Demo works and is honestly labeled.
+> * Page switching stops audio and camera resources.
+> * Both project pages still work.
+> * Production build and base-path behavior are checked.
+>
+> Do not claim physical-camera or listening tests were performed if the environment does not allow them. Provide a short manual test checklist.
+> Extend PRESENTATION_NOTES.md with:
+>
+> * A 2–3 minute explanation of Air Canvas.
+> * What each button and mapping does.
+> * A 30-second performance sequence.
+> * Likely questions and accurate answers.
+> * Limitations, including sensitivity to lighting, occlusion, and hand position.
+>
+> Run and launch the completed app. Give me its local URL, any verified hosted URL, and precise instructions for reopening it.
+
+</details>
+
+### What I clarified or changed
+
+**Easier phone pairing.** Testing pairing showed me that connecting the phone was confusing. I also pointed out that people using the hosted app wouldn't be able to run local Terminal commands:
 
 > is there any way you could make connecting the phone more intuitive? and if i were to host on github pages, you wouldn't be able to run the terminal commands locally
 
+After this, the hosted laptop page shows a QR code as soon as it opens, and the phone walks through numbered steps. We also moved hosting to GitHub Pages, so nobody needs Terminal to use it.
+
+**Explaining the controls.** I found the on-page text hard to use while presenting. So I asked for a guided tour that points at each control, and for clearer movement tracks:
+
 <details>
-<summary>Spotlight tour and clearer Movement Score (verbatim, October 13)</summary>
+<summary>Tour and clarity feedback (verbatim, October 13)</summary>
 
 > Perfect, now last thing. I know that you already put a lot of notes underneath a lot of the frequency components and explained what they do etc, but there's a lot of text and I want to be able to look at a component and explain what it does/how to walk someone through. The demo guide was very helpful but would be nice if the pop up would point to or be next to the relevant sections, and I want it to also maybe highlight and narrow down with like a dim circle or something to show what the demo is explaining how to mess around with something, especially the pentatonic which is something we haven't talked about. also don't quite understand why our only 2 options are flow and accent, what does that mean? And also, the pitch, movement, harmonics is really cool but i don't get what im seeing there, the key words you put ARE DEFINITELY Helpful but not as intuitive as i like. The spectrogram is cool too. Just wish the Part C with learn/settings were better incorporated in the whole thing instead of just istting at the end if that makes sense? Then, I'd also like you help me write notes for what to say when I'm explaining the frequency playground, and then the motion score while also adding pointers here and there that tell me where to click to demonstrate each thing, make it sound as natural as possible and I will have these notes written down somewhere.
 
 </details>
 
+**Separating pitch from timbre.** In the first version, movement intensity controlled both loudness and the number of harmonics, so I couldn't change tone quality on its own. I asked for a "Tilt instrument" where forward and back tilt sets pitch and sideways lean sets harmonic richness. I also asked for a pitch lock at 200 Hz for demos:
+
 <details>
-<summary>Tilt instrument (verbatim, October 18)</summary>
+<summary>Tilt instrument request (verbatim, October 18)</summary>
 
 > I’m improving my existing Motion Score instrument for my DSC 180 capstone with Professor Minces. Please inspect the existing implementation first, then implement the changes below in the existing project.
 > Assignment:
@@ -1496,8 +1500,10 @@ Pairing change (verbatim, October 13):
 
 </details>
 
+**Fixing calibration after phone testing.** When I tested on my phone, tilting forward sometimes changed richness too. I asked for clearer holding instructions and a pure tone at neutral, with a small dead zone. I also asked for a live readout and a "Lock richness" option:
+
 <details>
-<summary>Calibration and gesture-separation fixes (verbatim, October 19)</summary>
+<summary>Calibration and gesture fixes (verbatim, October 19)</summary>
 
 > The improved instrument works, but physical phone testing revealed a usability issue with calibration and gesture separation.
 > Depending on how I hold the phone during calibration, “toward/away” and “left/right” become unclear. When I try to change only pitch with forward/back tilt, I sometimes see harmonic richness changing too.
@@ -1519,24 +1525,13 @@ Pairing change (verbatim, October 13):
 
 </details>
 
-### What Claude implemented
+### What Claude built
 
-- **Air Canvas (October 13):** MediaPipe hand tracking that controlled pitch and harmonics. It was later removed.
-- **Motion Score (October 13):** a laptop page and a phone Controller page paired over WebRTC (PeerJS), phone motion and orientation sensors mapped to an additive synthesizer, Flow and Accents modes, Continuous and Pentatonic pitch, calibration and safety rules, and Laptop Demo. A later change shows the QR code automatically and turns phone setup into a 3-step flow. Claude also set up the Git repository and the GitHub Pages workflow.
-- **Spotlight tour (October 13):** a 17-step Demo Guide that highlights each control, "?" buttons on each section, clearer Movement Score tracks, and inline explanations.
-- **Tilt instrument (October 18):** sideways lean controls harmonic richness, plus Steady sustain, Lock fundamental, a harmonic panel and an auto demo.
-- **Orientation fixes (October 19):** tilt and lean measured relative to the calibrated holding position, a pure tone at neutral with a dead zone, holding-position checks, a live gesture readout and Lock richness.
+Claude built the laptop page and the phone Controller page, paired over WebRTC with PeerJS. It turned the sensor data into pitch and harmonics on an additive synthesizer, with Flow and Accents modes and Continuous and Pentatonic pitch. It also built calibration, safety rules such as going silent when the phone disconnects, a Laptop Demo and the spotlight tour. Claude also set up the Git repository and the GitHub Pages deployment. Later, it added the Tilt instrument and the orientation-relative tilt and lean.
 
 ### How it was tested
 
-| Date | Unit tests | End-to-end browser checks | Frequency Playground checks |
-|---|---|---|---|
-| Oct 13 (Air Canvas) | 21/21 | 37/37 (fake webcam video of a hand fed to the real MediaPipe model) | 36/36 |
-| Oct 13 (Motion Score) | 33/33 | 46/46 (simulated phone with real PeerJS pairing), then 47/47 after the pairing change, including on the live site | 36/36 |
-| Oct 18 | 43 pass | 65 pass, including on the live site | 36/36 |
-| Oct 19 | 51 pass | 67 pass, locally and on the live site, including simulated orientation cases | — |
-
-The Oct 18 checks confirmed, for example, that at a locked 200 Hz the output was 200 Hz alone at minimum richness and 200/400/600/800/1000 Hz as richness rose. These checks used a simulated phone. Physical sensors and listening were outside them.
+Claude ran unit tests and end-to-end browser checks, with a simulated phone paired through the real PeerJS service. They grew from 33 tests and 46 checks on Oct 13 to 51 tests and 67 checks on Oct 19, and all passed, including on the live site. I tested the Oct 18 version on my own phone. That test is what led to the Oct 19 calibration fixes.
 
 ## Frequency Playground: microphone input (assignment 1, October 25)
 
@@ -1674,20 +1669,21 @@ The Oct 18 checks confirmed, for example, that at a locked 200 Hz the output was
 
 </details>
 
-### What Claude implemented
+### What I wanted
 
-Enable and Stop Microphone, a status display, an input-level meter, Freeze View and Resume View, and separate microphone-only waveform and spectrum plots. The microphone is never played through the speakers. It also wrote `MIC_UPDATE.md`.
+I wanted to see my own voice as a waveform and a spectrum before trying to recreate vowels, and I kept this stage deliberately small. I made several design decisions in the prompt:
+- The microphone must never play through the speakers.
+- Echo cancellation, noise suppression and auto gain should be turned off where the browser allows.
+- Freeze View has to be clearly different from Stop Microphone.
+- The app must not label the tallest peak as the fundamental.
+
+### What Claude built
+
+Claude added Enable and Stop Microphone, a status display, a level meter, and Freeze View and Resume View. It also added separate microphone-only waveform and spectrum plots.
 
 ### How it was tested
 
-| Check | Result |
-|---|---|
-| Unit tests (17 new microphone tests, simulated input) | 68/68 pass |
-| Simulated-microphone browser checks | 46/46 pass |
-| Synthesizer browser checks | 36/36 pass |
-| Motion Score Laptop Demo checks | 12/12 pass (the phone-pairing checks could not reach PeerJS from Claude's environment) |
-| `npm test` and `npm run build` on my Mac | 68/68 pass, build succeeded |
-| Deployment of `465b9dd` | Succeeded; the live JavaScript contained the microphone controls |
+Claude's checks with a simulated microphone passed: 68 unit tests and 46 browser checks. The existing synthesizer checks also still passed. I then tested it with my real microphone before it was published.
 
 ## Frequency Playground: Vowel Lab (assignment 2, October 25)
 
@@ -1871,26 +1867,29 @@ Enable and Stop Microphone, a status display, an input-level meter, Freeze View 
 
 </details>
 
-### What Claude implemented
+### What I wanted
 
-Vowel Lab inside Frequency Playground: named vowel recordings kept in browser storage, WAV export and import, tools for estimating the fundamental by hand (waveform cursors, a spectrum cursor, n × f0 markers), 4–48 harmonic amplitude sliders, Original and Synthesized playback with overlaid spectra, saved experiments with settings JSON, and duplicate options for trying a second pitch. As the prompt required, it has no automatic fitting.
+The assignment was to recreate vowels by hand with harmonic sliders. I wanted to do the listening and adjusting myself, so I said not to add automatic fitting or a button that makes a finished match. I asked for a record, inspect, set fundamental, adjust harmonics, compare and save workflow. I also asked for a way to duplicate an experiment, so I could compare the same vowel at a second pitch.
+
+### What Claude built
+
+Claude built Vowel Lab inside Frequency Playground:
+- Named vowel recordings saved in the browser, with WAV export and import.
+- Tools for estimating the fundamental by hand.
+- Up to 48 harmonic sliders at n × f₀.
+- Original and Synthesized playback with overlaid spectra.
+- Saved experiments with settings files.
 
 ### How it was tested
 
-| Check | Result |
-|---|---|
-| Unit tests (15 new) | 83/83 pass |
-| Vowel Lab browser checks (simulated microphone) | 49/49 pass |
-| Microphone and manual-mode browser checks | 45/45 and 36/36 pass |
-| `npm test` and `npm run build` on my Mac | 83/83 pass, build succeeded |
-| Deployment of `4f8e607` | Succeeded; the live build contained the microphone feature and Vowel Lab |
+Claude's checks with a simulated microphone passed: 83 unit tests and 49 Vowel Lab browser checks. I tested Vowel Lab myself and did the slider matching by ear. For example, my lower "ah" came out at about 248 Hz, and my "oo" matched best with only harmonics 1–4.
 
 ## Frequency Playground: automatic vowel synthesis and guided tour (assignment 3, October 25–27)
 
-### Main prompts
+### Main build prompt
 
 <details>
-<summary>Automatic vowel synthesis build prompt (verbatim, October 25)</summary>
+<summary>Build prompt (verbatim, October 25)</summary>
 
 > Please help me attempt assignment 3 in my existing Frequency Playground app.
 >
@@ -2025,8 +2024,16 @@ Vowel Lab inside Frequency Playground: named vowel recordings kept in browser st
 
 </details>
 
+### What I wanted
+
+My professor said this part might fail and that understanding the process was the point. So I asked Claude to explain the approaches and their sources first, then build one manageable version. I gave my manual results as a comparison and said not to hard-code them. I also asked that automatic results never overwrite my manual experiments, and that an unreliable result be explained instead of looking confident.
+
+### What I clarified or changed
+
+I first asked for a click-through tutorial popup. Then I decided it was too text-heavy and asked for an on-page tour like the one in Motion Score:
+
 <details>
-<summary>Tutorial prompt (verbatim, October 27)</summary>
+<summary>Tutorial request (verbatim, October 27)</summary>
 
 > Please update my existing Frequency Playground project:
 >
@@ -2100,7 +2107,7 @@ Vowel Lab inside Frequency Playground: named vowel recordings kept in browser st
 </details>
 
 <details>
-<summary>Guided on-page tour prompt (verbatim, October 27)</summary>
+<summary>Guided tour request (verbatim, October 27)</summary>
 
 > Please improve the Vowel Lab tutorial in ~/Desktop/frequency-playground.
 >
@@ -2165,26 +2172,23 @@ Vowel Lab inside Frequency Playground: named vowel recordings kept in browser st
 
 </details>
 
-### What Claude implemented
+### What Claude built
 
-- Before building, Claude explained the approaches: periodicity-based pitch estimation (autocorrelation, YIN, cepstrum), Fourier analysis of harmonic strengths, and additive versus source-filter synthesis, with links to primary sources. The sources are in `AUTO_VOWEL_UPDATE.md`.
-- **Automatic vowel synthesis:** a YIN fundamental estimate over up to 60 frames (median), a windowed FFT harmonic measurement with peak interpolation and a noise threshold, resynthesis through the existing additive synthesizer, labelled manual f0 correction, plain "No reliable result" messages, and saving as a separate experiment.
-- **Tutorial, then tour:** a 10-step "How to use Vowel Lab" popup, then a 24-step on-page tour that replaced it.
+Claude explained the options: autocorrelation, YIN and cepstrum for pitch, Fourier analysis for harmonic strengths, and additive versus source-filter synthesis. Then it implemented an "Automatic vowel synthesis" section:
+- A YIN pitch estimate over many short frames.
+- A windowed FFT measurement of each harmonic.
+- A labelled manual pitch correction.
+- Saving as a separate experiment.
+
+It then replaced the tutorial popup with a 24-step tour that highlights the real controls.
 
 ### How it was tested
 
-| Check | Result |
-|---|---|
-| Unit tests, including synthetic known-harmonic signals and a higher harmonic stronger than the fundamental | 96/96 pass, in the cloud and on my Mac |
-| Automatic-synthesis browser checks | 26/26 pass |
-| Synthetic 248 Hz vowel-like tone | Estimated 247.98 Hz, harmonics 1–4 within 0.1 dB. Claude noted that a tone built from harmonics is an easy case for this method. |
-| Tutorial popup: unit tests and build on my Mac; tutorial browser checks | 99/99 pass, build succeeded; 22/22 |
-| Guided tour: unit tests and build on my Mac; tour browser checks | 100/100 pass, build succeeded; 24/24 at desktop and phone size, with and without a recording |
-| Deployments of `ac727d6` and `73c25bd` | Both succeeded; the live build contained the new features |
+Claude ran tests with synthetic tones of known pitch, and they passed, including a case where a higher harmonic is louder than the fundamental. For a 248 Hz test tone, the app estimated 247.98 Hz. In the final version, all 100 unit tests passed, and so did 24 tour checks at desktop and phone sizes.
 
 ## Frequency Playground: Vowel filtering (assignment 4, October 31)
 
-### Main prompts
+### Main build prompt
 
 <details>
 <summary>Build prompt (verbatim, October 31)</summary>
@@ -2424,8 +2428,19 @@ Vowel Lab inside Frequency Playground: named vowel recordings kept in browser st
 
 </details>
 
+### What I wanted
+
+My professor showed a filter as a shape you drag over the spectrum. I wanted my own version: start from the fundamental and all harmonics at equal strength, then shape a vowel only with a real filter. I also asked for these rules:
+- The filter only cuts, never boosts.
+- The curve on screen has to match what the audio actually does.
+- Automatic matching changes the filter, never the source harmonics.
+
+### What I clarified or changed
+
+After trying it, the feature felt centered on recordings. I asked to make recording optional and split it into three workflows: vowel examples, my own frequencies, and matching a recording:
+
 <details>
-<summary>Three-workflow change, making recording optional (verbatim, October 31)</summary>
+<summary>Three-workflow request (verbatim, October 31)</summary>
 
 > Please improve the Vowel filtering feature in Frequency Playground so recording my voice is clearly OPTIONAL.
 >
@@ -2542,28 +2557,17 @@ Vowel Lab inside Frequency Playground: named vowel recordings kept in browser st
 
 </details>
 
-### What Claude implemented
+### What Claude built
 
-A "Vowel filtering" section:
-- A source of the fundamental and every harmonic at amplitude 1.
-- A real Web Audio filter chain of 8 cut-only peaking biquads, with draggable points and number fields, Filter on/bypass and Reset.
-- Play Original, Unfiltered, Filtered and Original → Filtered.
-- "Match filter to recording", a least-squares fit of the 8 filters to the recording's measured harmonic strengths.
-- Starting examples fitted to published average formants (Hillenbrand et al. 1995).
-- Saving, WAV and JSON export, a 13-step tour and `FILTER_VOWEL_UPDATE.md`.
-
-The follow-up added three workflows (vowel examples, my own frequencies, match a recording) and renamed the examples Aa, Eh, Ee, Oh and Oo. A noise source was added on November 5–6 (see [Linear interpolation, noise and fricatives](#linear-interpolation-noise-and-fricatives-november-56-2026)).
+Claude built the "Vowel filtering" section:
+- An equal-strength harmonic source run through a chain of 8 cut-only Web Audio filters, with draggable points.
+- "Match filter to recording", which fits the filter to a recording's measured harmonics.
+- Aa, Eh, Ee, Oh and Oo starting examples based on published average vowel resonances.
+- Saving and WAV export.
 
 ### How it was tested
 
-| Check | Result |
-|---|---|
-| First version: unit tests; filter browser checks | 114/114 pass; 55/55 pass |
-| Synthetic recording made with a known filter | The fit recovered its harmonic levels within 0.1 dB. The vowel examples land 2.6–5 dB RMS from their target shapes. |
-| Three-workflow version: unit tests | 119/119 pass |
-| Three-workflow version: browser checks from empty storage | 31/31 workflows, 57/57 recording matching; build succeeded |
-
-The commit `b4ca719` was pushed to `main`. Its GitHub Pages deployment was not checked.
+Claude's checks passed: 119 unit tests and 88 browser checks across the three workflows. A filter fitted to a synthetic recording made with a known filter recovered its levels within 0.1 dB. I listened to the examples myself, and Aa, Ee and Oo sounded recognizable without a recording.
 
 ## Vowel Morph (tasks 3 and 4, October 31)
 
@@ -2808,51 +2812,26 @@ The commit `b4ca719` was pushed to `main`. Its GitHub Pages deployment was not c
 
 </details>
 
-### What Claude implemented
+### What I wanted
 
-Claude wrote all of the Vowel Morph code. It is a third app in the existing site, with its own route (`#/vowel-morph`) and a "3. Vowel Morph" navigation button. Outside the new folder `src/pages/vowel-morph/`, it changed only `index.html` and `src/main.js`. It reused the Frequency Playground's recorder, WAV encoder/decoder and automatic vowel analysis without changing them. The automatic analysis is a YIN fundamental estimate over many short frames, plus Hann-windowed FFT harmonic strengths.
+I wanted a slider between two recorded vowels and a square where recorded vowels become dots, with clicks in between producing a blended sound. The key point in my prompt was what "interpolate" means: blend the fundamental and harmonic strengths, then synthesize one new sound. Crossfading two recordings wasn't enough. I also asked:
+- Clicking exactly on a dot must reproduce that vowel exactly.
+- Placing dots and playing must be separate modes.
+- Backups must include the recordings, so a sound space can move to the live site.
 
-- **Representation:** each recorded vowel is stored as a fundamental (f0) plus 48 relative harmonic strengths. Unmeasured harmonics are exactly 0, and the original recording is kept with it.
-- **1D slider (task 3):**
-  - Vowel A and Vowel B areas, each with record (up to 4 s), WAV import, Original playback and Synthesized preview.
-  - Analysis adjustment: choosing the steady section, and a manual f0 correction that is labelled MANUAL.
-  - A slider labelled A on the left and B on the right, with Play and Stop controls.
-  - Readouts of the position and weights, the current f0, and the harmonic spectrum.
-  - Blending: pitch is a weighted geometric mean (linear in semitones), and each harmonic is a weighted average in decibels with a −60 dB floor. Each endpoint returns that vowel's analyzed values exactly.
-  - Playback: a bank of 48 sine oscillators keeps running, and its frequency and gain targets glide while you drag, so nothing restarts.
-- **2D sound space (task 4):**
-  - Vowels become labelled dots, with separate "Edit / place dots" and "Play / explore" modes.
-  - Weights are inverse-distance weights (Shepard 1968, power 2 by default, adjustable). They sum to 1, and a dot's position gives that dot's exact values.
-  - The same pitch and harmonic blending as the slider is used.
-  - A weights table, lines from the marker to each dot, and f0 and spectrum readouts.
-  - Tapping a dot can play its synthesized sound or its ORIGINAL recording. A drag never switches to a recording.
-- **Shared:**
-  - Equal-RMS loudness for every synthesized sound.
-  - A fade-out of components near the Nyquist frequency.
-  - Storage separate from the other apps.
-  - A backup file that includes the recordings, and an import that only adds.
-  - WAV downloads, a 13-step guided tour, and `VOWEL_MORPH_UPDATE.md`.
+### What Claude built
 
-The pitch and harmonic blending rule above was replaced with linear interpolation on November 5–6 (see [Linear interpolation, noise and fricatives](#linear-interpolation-noise-and-fricatives-november-56-2026)).
+Claude built Vowel Morph as a third app in the site. Each vowel is stored as a fundamental plus 48 harmonic strengths. The 1D slider blends two vowels, and the 2D square uses inverse-distance weights that always add up to 1. One bank of sine oscillators plays the result without restarting while you drag. Claude also added a guided tour, separate storage and a backup file that includes the recordings.
 
 ### How it was tested
 
-| Command | Result | Notes |
-|---|---|---|
-| `npm test` | 144/144 pass | 25 new Vowel Morph tests in `test/vowel-morph.test.js` plus 119 existing tests |
-| `node scripts/verify-vowel-morph.mjs` (Playwright, Chromium) | 52/52 pass | Simulated vowels as WAV imports, and one take through Chromium's fake microphone |
-| Existing browser checks against the same dev server | All pass | `verify` 36/36, `verify-motion` 67/67, `verify-mic` 45/45, `verify-vowel` 49/49, `verify-auto-vowel` 26/26, `verify-tutorial` 24/24, `verify-filter` 57/57, `verify-filter-workflows` 31/31 |
-| `npm run build` | Succeeded | |
-| Clean copy (`73c25bd` plus only the Vowel Morph files): `npm test`, GitHub Pages build and browser checks | 125/125 pass; build succeeded | `verify-vowel-morph` 52/52, and the other apps' checks pass |
-| Deployment of `76b3ed7` | Succeeded | The deployed JavaScript contained the Vowel Morph code. Nobody clicked through the live page as part of this check. |
+Claude's checks passed: 144 unit tests, including 25 new ones for Vowel Morph, and 52 browser checks with simulated vowels. The existing apps' checks still passed, and the deployment succeeded. I tested Vowel Morph myself and recorded a demo of both the slider and the square.
 
 ## Linear interpolation, noise and fricatives (November 5–6, 2026)
 
-This change covers Vowel Morph and Vowel filtering.
+### Main build prompt
 
-### Main prompt
-
-Prompt (verbatim, sent November 6, 2026 UTC; drafted with help from ChatGPT):
+Prompt (verbatim, sent November 6, 2026 UTC). ChatGPT helped me word it:
 
 <details>
 <summary>Full prompt</summary>
@@ -2879,41 +2858,14 @@ Prompt (verbatim, sent November 6, 2026 UTC; drafted with help from ChatGPT):
 
 </details>
 
-### What Claude verified in the existing implementation
+### What I wanted
 
-- **2D workflow:** recording, analysis into f0 and 48 harmonic amplitudes, placing a dot, and playing a dot's synthesized reconstruction already worked. The inverse-distance weights already behaved correctly (normalized, exact on a dot, zero and one dot handled), so they were kept.
-- **Interpolation rule did not match this assignment.** Both views blended f0 as a geometric mean (semitones) and harmonic amplitudes in decibels with a −60 dB floor. Halfway between 200 Hz and 300 Hz gave 244.9 Hz, not 250 Hz. The prompt asks for linear interpolation.
-- **Playback path:** Claude read `morph-audio.js` and `index.js`. Slider and square sounds go through one bank of 48 sine oscillators whose targets change, and that path uses no recording buffer. A recording plays only from an explicit Original control or a dot tap in Original mode. Switching between a recording and the synthesizer stops the first with a 40 ms fade, so they overlap only during that fade.
+I thought the vowel blending might already work, so I asked Claude to check it before changing anything. I specified linear interpolation of the fundamental and each harmonic, with the midpoint as a 50/50 blend played by one synthesizer. I also wanted a noise source in the filter workflow, to try "shh", "fff", "sss" and "jjj". The prompt also asked for one small attempt at estimating a filter from a recording.
 
-### What Claude changed
+### What Claude built
 
-- **Vowel Morph:** `blendParams` is now a plain weighted average of f0 and of each harmonic amplitude, in both 1D and 2D. Endpoints and dots still return exact values. The on-page formula, tour and `VOWEL_MORPH_UPDATE.md` were updated, including the 25 + 119 test split.
-- **Noise source:** a Noise source panel in Vowel filtering, with noise level, harmonic level, "Harmonics skip the filter" and "Filtered noise only". Noise is off by default. It uses the existing filter and spectrum views.
-- **Fricatives:** a fourth workflow, "Noise and fricatives", with editable starting points for shh, fff, jjj and sss. Claude read "jjj" as the voiced sound in "measure", which is an assumption for me to confirm.
-- **Automation attempt:** "Estimate filter from recording" reduces a section's averaged spectrum to third-octave levels and fits the existing 8 filter points. Only the filter is estimated. `NOISE_FRICATIVE_UPDATE.md` lists what is preset versus estimated, and the limits.
-- **Tests and scripts:** new `test/noise-fricative.test.js` and `scripts/verify-noise.mjs`, more checks in `test/vowel-morph.test.js` and `scripts/verify-vowel-morph.mjs`, and a `--disable-audio-output` flag in the browser scripts. The flag was needed because the Mac's audio clock was not advancing for headless Chromium during this session.
+Claude found that the blending used semitones and decibels rather than the linear rule I asked for. It changed both the slider and the square to plain weighted averages. In Vowel filtering it added a noise source and a "Noise and fricatives" workflow with editable starting points. It also added "Estimate filter from recording", which fits the existing filter points to a recording's broad spectrum.
 
-### How it was tested (November 5, 2026 Pacific)
+### How it was tested
 
-These use synthetic signals, a fake microphone and the app's state. None of them involve listening.
-
-| Command | Result |
-|---|---|
-| `npm test` | 157/157 pass (27 in `test/vowel-morph.test.js`, 11 in `test/noise-fricative.test.js`) |
-| `npm run build` | Succeeded |
-| `node scripts/verify-vowel-morph.mjs http://localhost:5181/` | 54/54 pass |
-| `node scripts/verify-noise.mjs http://localhost:5181/` | 22/22 pass |
-| `node scripts/verify-filter.mjs http://localhost:5181/` | 57/57 pass |
-| `node scripts/verify-filter-workflows.mjs http://localhost:5181/` | 31/31 pass |
-| `verify`, `verify-motion`, `verify-mic`, `verify-vowel`, `verify-auto-vowel`, `verify-tutorial` (same URL) | 36/36, 67/67, 45/45, 49/49, 26/26, 24/24 pass |
-
-Notes on these runs:
-
-- `verify-filter-workflows` first failed 30/31, because the fricative buttons shared a CSS class with the vowel buttons. Claude renamed the class and re-ran `verify-filter`, `verify-filter-workflows`, `verify-noise`, the build and `npm test`. The other browser scripts in the table ran just before that rename and were not repeated.
-- One `verify-motion` run was stopped by Claude after 59 passing checks because it looked stuck. A repeat run passed 67/67.
-- The controls were exercised in headless Chromium by these scripts. Claude did not use the app by hand or listen to it.
-
-## Records not available
-
-- **Harmonic Explorer:** the script behind Claude's 19 checks was not saved, so those results can't be re-run.
-- **Vowel filtering:** the GitHub Pages deployment of `b4ca719` was not checked.
+Claude's checks passed: 157 unit tests, the build, and the browser checks for Vowel Morph (54), noise (22) and the existing apps. Listening tests with my own recordings were not part of these checks.
