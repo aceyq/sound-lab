@@ -1,4 +1,4 @@
-// Text for Motion Score. Labels here must match PRESENTATION_NOTES.md.
+// Text for Motion Score.
 
 export const HONESTY =
   'This uses phone sensor measurements and explicitly programmed mappings to synthesize sound. It does not train a model to recognize dance movements.';

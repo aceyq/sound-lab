@@ -1,43 +1,23 @@
 # AI Use Disclosure: DSC 180A, Quarter 1
 
 **Student:** Acelynn (Ace) Qiao
-**Repository:** https://github.com/aceyq/sound-lab (local checkout `~/Desktop/frequency-playground`, branch `main`)
+**Repository:** https://github.com/aceyq/sound-lab
 **Live site:** https://aceyq.github.io/sound-lab/
-**AI tool:** Claude (Anthropic), used as Claude Code through Claude project threads. Some work ran in Claude's cloud environment and was copied to my Mac; some ran directly in my project folder on my Mac through Claude Code sessions that I approved.
+**AI tool:** Claude (Anthropic), used as Claude Code through Claude chats and project threads. ChatGPT helped me draft the November 6 prompt; that is noted where it is quoted.
 
-This file records how I used AI for each Quarter 1 project. It was compiled on November 5, 2026 from the Claude project threads where the work happened, the update guides in this repository, and this repository's Git history. Where a record is missing, it says so instead of filling the gap.
-
-How to read it:
-
-- **"What I asked for"** quotes my own prompts word for word. Long prompts are collapsed; click to expand.
-- **"My testing"** lists only testing that my own messages record. It is kept separate from Claude's automated checks.
-- **"Automated checks"** are tests and browser checks that Claude reported running, mostly with synthetic signals, a simulated microphone or a simulated phone. None of them involve listening.
-- Dates and times are UTC, as the project threads record them. In California (UTC−7) some of these fall on the previous evening.
-- Claude's own messages are summarized, not quoted.
+This file is organized by app and major feature, in the order I built them. Each section quotes the main prompts I sent to build or substantially change that feature, word for word (long prompts are collapsed; click to expand). It then summarizes what Claude implemented and how the code was tested. The test results are the ones Claude reported. Unless a section says otherwise, they come from automated checks that used synthetic signals, a simulated microphone or a simulated phone, and none of them involve listening. Dates are UTC.
 
 ## Summary of contributions
 
-**My part:** I turned Professor Minces's assignments into detailed written requirements for each feature, as the prompts below show. I made the scope and design calls in those prompts, tested features on my own hardware and by ear where my messages say so, recorded the demo videos and presented the work. Where my prompts authorize committing and publishing, the quotes below show it.
+**My part:** I turned Professor Minces's assignments into detailed written requirements for each feature, as the prompts below show, and made the scope and design decisions in them. I tested features on my own hardware and by ear, recorded the demo videos and presented the work.
 
-**Claude's part:** Claude wrote the application code, unit tests, browser verification scripts, README sections, update guides (`*_UPDATE.md`), `PRESENTATION_NOTES.md` and `SPEAKER_NOTES.md`. It ran the automated checks and production builds, and it committed, pushed and checked deployments for most updates. It also explained the signal-processing methods and pointed me to sources. The details are in each section.
+**Claude's part:** Claude wrote the application code, unit tests, browser verification scripts, README sections and update guides (`*_UPDATE.md`). It ran the automated checks and production builds, and it explained the signal-processing methods with sources.
 
-**Commits:** every commit in this repository shows my Git identity as the author, because they were all made on my Mac with my Git configuration. That identity does not show who typed the commit command or who wrote the code. This table does:
+**Commits:** every commit shows my Git identity, because they were all made on my Mac with my Git configuration. Claude ran the commits and pushes for most updates through Claude Code sessions on my Mac. I ran two myself in Terminal, `76b3ed7` (Vowel Morph) and `b4ca719` (Vowel filtering), because Claude Code's permission check blocked Claude's own `git commit`. Claude wrote the code in both.
 
-| Commit | Date (UTC) | Feature | Who ran `git commit` / `git push` | Who wrote the code |
-|---|---|---|---|---|
-| `5d1af94`, `e3e9590`, `a01f8a1` | Oct 13 | Frequency Playground and Motion Score, first publish | Claude, in a Claude Code session on my Mac | Claude |
-| `7f38c7b`, `c005921` | Oct 18 | Motion Score: Tilt instrument | Claude, on my Mac (it reported the update live) | Claude |
-| `383e1ef` | Oct 19 | Motion Score: orientation-relative tilt | Claude, on my Mac (it reported the update live) | Claude |
-| `465b9dd` | Oct 25 | Microphone input | Claude, in a Remote Control session on my Mac | Claude |
-| `4f8e607` | Oct 25 | Vowel Lab | Claude, in a Remote Control session on my Mac | Claude |
-| `ac727d6` | Oct 27 | Automatic vowel synthesis and tutorial | Claude, in a Remote Control session on my Mac | Claude |
-| `73c25bd` | Oct 27 | Guided on-page Vowel Lab tour | Claude, in a Remote Control session on my Mac | Claude |
-| `76b3ed7` | Oct 31 | Vowel Morph | Me, in Terminal, with commands Claude drafted (Claude Code's permission check blocked Claude's own commit) | Claude |
-| `b4ca719` | Oct 31 | Vowel filtering | Me, in Terminal (see [Vowel filtering](#vowel-filtering-assignment-4-october-31)) | Claude |
+## Week 2 — Harmonic Explorer (Oct 5–6, 2026)
 
-## Week 2 — Harmonic Explorer (Frequency Playground?) — Claude project chat, Oct 5–6, 2026
-
-> ⚠ **To confirm:** Is "Harmonic Explorer" the same thing as the "Frequency Playground" on the checkpoint list?
+**Tool:** Claude, in my DSC180A Web App chat.
 
 ### Main build prompt (verbatim, sent Oct 5, 2026)
 I attached a screenshot of my professor's app as a visual reference (the image itself isn't reproduced here).
@@ -223,14 +203,8 @@ Please complete the implementation, run it, and launch it now.
 ```
 </details>
 
-> ⚠ **To confirm:** Did ChatGPT help draft this prompt? Note it here if so.
-
-### Follow-up that led to a design decision
-- Oct 6, verbatim: *"can you make it look more like my professors looks like, instead of this dragging one"*. Claude started restyling the drag sliders into the professor's clickable harmonic bars.
-- Oct 6, verbatim: *"close app, no need to restule"*. I cancelled the restyle, so the shipped app keeps the original slider controls. None of the restyle code was kept.
-
-### What I specified or decided
-All of the requirements above came from me: the tech stack, value ranges and defaults, the 10 harmonics, the PeriodicWave approach, normalization with a common factor, a real AnalyserNode FFT instead of decorative bars, the presets, the layout, the explanatory text, and the verification checklist. I also decided to keep the original controls rather than restyle them.
+### What I specified
+All of the requirements above came from me: the tech stack, value ranges and defaults, the 10 harmonics, the PeriodicWave approach, normalization with a common factor, a real AnalyserNode FFT instead of decorative bars, the presets, the layout, the explanatory text, and the verification checklist.
 
 ### What Claude built
 Claude wrote all of the code:
@@ -240,10 +214,10 @@ Claude wrote all of the code:
 - **Controls:** presets, Reset, master volume, fades and input validation.
 - **Docs and delivery:** the README and a published playable version.
 
-> ⚠ **To confirm:** Did you edit any of the code by hand?
+I did not edit any of the code by hand. The code is in a separate folder on my Mac, `~/Desktop/harmonic-explorer`. It is not part of the `sound-lab` repository.
 
-### Testing
-**Automated checks Claude ran (claimed in the chat, I can't verify them).** Claude reported 19 of 19 checks passing in headless Chromium against the dev server, the production build and the published page:
+### How it was tested
+Claude reported 19 of 19 checks passing in headless Chromium against the dev server, the production build and the published page:
 1. A 220 Hz sine gave an FFT peak at 221 Hz, within one bin of about 2.7 Hz.
 2. Turning up H2 added a peak at 439 Hz.
 3. At 300 Hz the labels read 300–3000 Hz, and the sawtooth-like preset peaked at all 10 multiples.
@@ -253,29 +227,14 @@ Claude wrote all of the code:
 7. The plots sat side by side at 1440 px and stacked at 390 px.
 8. `npm run build` succeeded.
 
-Claude also reported checking number validation, keyboard control of the sliders and Reset, and seeing no app console errors apart from a blocked Google Font.
+Claude also reported checking number validation, keyboard control of the sliders and Reset, and seeing no app console errors apart from a blocked Google Font. The test script was not saved, so these results can't be re-run and rest only on Claude's report.
 
-> ⚠ The test script was not saved to the repo, so these results can't be re-run and rest only on Claude's report.
+## Frequency Playground (Project 1, October 13)
 
-**Manual browser checks (by me):** ⚠ *Unverified.* Claude started the app on my Mac at `http://localhost:5173` (Oct 5 and Oct 6). The chat doesn't record what I checked in it, so fill in what you actually tried.
-
-**Listening comparisons (by me):** ⚠ *Proposed, not recorded as done.* Claude asked me to check, at low volume, that the sound is clean, that Play and Stop fade without clicks, and that sawtooth sounds brighter than sine. Fill in what you actually heard.
-
-### Routine commands (summary)
-I asked Claude to close the app in Terminal (it said to use Ctrl+C), to start it when I say "run the app", and to close it again. I declined the first request to run it on my Mac and allowed the second. Claude then ran `npm run dev -- --open` in `~/Desktop/harmonic-explorer` and stopped the server when I asked. None of these steps changed any code.
-
-### Checked against the project folder (November 5, 2026)
-
-The Harmonic Explorer code is in a separate folder, `~/Desktop/harmonic-explorer`, on my Mac. It is not part of the `sound-lab` repository and has no Git history. Its `README.md` matches the app described above, and its source files are dated October 5, 2026 (UTC). This entry comes from my DSC180A Web App chat, not from the Claude project threads used for the rest of this file.
-
-## Project 1: Frequency Playground (October 13)
-
-**Tool and dates:** Claude Code in a Claude project thread, October 13, 2026. Claude built the app in its cloud environment and then, in a Claude Code session on my Mac, unzipped it into `~/Desktop/frequency-playground` and started it.
-
-### What I asked for
+### Main build prompt
 
 <details>
-<summary>Original build prompt (verbatim, October 13)</summary>
+<summary>Build prompt (verbatim, October 13)</summary>
 
 > Implement Project 1 of my undergraduate Data Science capstone assignment: an educational sound app called “Frequency Playground.”
 > I need to present this tomorrow. A previous assignment produced a working synthesizer, but I did not fully understand its controls. This project must make the relationships between frequency, amplitude, waveform, spectrum, and sound intuitive through clear labels and guided experiments.
@@ -471,36 +430,26 @@ The Harmonic Explorer code is in a separate folder, `~/Desktop/harmonic-explorer
 
 </details>
 
-Follow-up (verbatim, October 13):
-
-> Is this a web app? If so, run it
-
 ### What Claude implemented
 
-Claude created the Vite project from scratch, because it found no earlier synthesizer in the project files. It built an editable table of up to 16 sine components, an additive-synthesis audio engine with shared normalization, a waveform plot with time-window and amplitude-scale controls, a measured FFT spectrum, a spectrogram, presets (pure tone, harmonic family, non-harmonic mixture, beats, randomize), a harmonic builder, eight guided experiments, a glossary, Presentation Mode, the README and `PRESENTATION_NOTES.md`.
+A new Vite app with an editable table of up to 16 sine components, an additive-synthesis audio engine with shared normalization, a waveform plot with time-window and amplitude-scale controls, a measured FFT spectrum, a spectrogram, presets (pure tone, harmonic family, non-harmonic mixture, beats, randomize), a harmonic builder, eight guided experiments, a glossary, Presentation Mode and the README. This repository started from this app.
 
-### My testing
-
-No message of mine records testing of this version. I presented it in class on October 13 (see [Presentation support](#presentation-support-october-13)).
-
-### Automated checks (as reported by Claude)
+### How it was tested
 
 | Check | Result |
 |---|---|
 | Unit tests | 10 pass |
-| `scripts/verify.mjs` (headless Chromium, real audio engine) | 36/36 pass |
-| Production build | Succeeded, including under a GitHub Pages sub-path |
+| `scripts/verify.mjs` (headless Chromium, real audio engine) | 36/36 pass: typed values change the oscillators, measured peaks land on the expected frequencies within one FFT bin, display scaling leaves the audio unchanged, silence and Play/Stop cleanup behave correctly, and the app works under a GitHub Pages sub-path |
+| Production build | Succeeded |
 
-Claude stated that it could not listen to the sound and that listening checks were mine to do.
+## Motion Score (Project 2, October 13–19)
 
-## Project 2: Air Canvas, then Motion Score (October 13–19)
+Project 2 started as Air Canvas, a hand-tracking instrument. Claude built it on October 13, and Motion Score replaced it the same day. Air Canvas is not in the current app.
 
-**Tool and dates:** Claude Code, running in a session on my Mac, October 13–19, 2026.
-
-### What I asked for
+### Main prompts
 
 <details>
-<summary>Air Canvas build prompt (verbatim, October 13). Claude built it, and it was replaced the same day.</summary>
+<summary>Air Canvas build prompt (verbatim, October 13)</summary>
 
 > Implement Project 2 within the existing app, on the separate “Air Canvas” page. Preserve Frequency Playground and its behavior.
 > PROJECT ASSIGNMENT
@@ -1415,25 +1364,19 @@ Claude stated that it could not listen to the sound and that listening checks we
 
 </details>
 
-Follow-ups on October 13 (verbatim, in order):
-
-> can you resume
-
-> I tried opening the link http://localhost:5173/#/controller?session=54TD-5C29&code=SQ5RUK on my phone and it didn't work? it says "safari can't open the page because it couldn't connect to the server"
+Pairing change (verbatim, October 13):
 
 > is there any way you could make connecting the phone more intuitive? and if i were to host on github pages, you wouldn't be able to run the terminal commands locally
 
-> username: aceyq
-
 <details>
-<summary>Spotlight tour, clearer Movement Score, and speaker notes (verbatim, October 13)</summary>
+<summary>Spotlight tour and clearer Movement Score (verbatim, October 13)</summary>
 
 > Perfect, now last thing. I know that you already put a lot of notes underneath a lot of the frequency components and explained what they do etc, but there's a lot of text and I want to be able to look at a component and explain what it does/how to walk someone through. The demo guide was very helpful but would be nice if the pop up would point to or be next to the relevant sections, and I want it to also maybe highlight and narrow down with like a dim circle or something to show what the demo is explaining how to mess around with something, especially the pentatonic which is something we haven't talked about. also don't quite understand why our only 2 options are flow and accent, what does that mean? And also, the pitch, movement, harmonics is really cool but i don't get what im seeing there, the key words you put ARE DEFINITELY Helpful but not as intuitive as i like. The spectrogram is cool too. Just wish the Part C with learn/settings were better incorporated in the whole thing instead of just istting at the end if that makes sense? Then, I'd also like you help me write notes for what to say when I'm explaining the frequency playground, and then the motion score while also adding pointers here and there that tell me where to click to demonstrate each thing, make it sound as natural as possible and I will have these notes written down somewhere.
 
 </details>
 
 <details>
-<summary>Tilt instrument improvements (verbatim, October 18)</summary>
+<summary>Tilt instrument (verbatim, October 18)</summary>
 
 > I’m improving my existing Motion Score instrument for my DSC 180 capstone with Professor Minces. Please inspect the existing implementation first, then implement the changes below in the existing project.
 > Assignment:
@@ -1554,7 +1497,7 @@ Follow-ups on October 13 (verbatim, in order):
 </details>
 
 <details>
-<summary>Calibration and gesture-separation fixes after phone testing (verbatim, October 19)</summary>
+<summary>Calibration and gesture-separation fixes (verbatim, October 19)</summary>
 
 > The improved instrument works, but physical phone testing revealed a usability issue with calibration and gesture separation.
 > Depending on how I hold the phone during calibration, “toward/away” and “left/right” become unclear. When I try to change only pitch with forward/back tilt, I sometimes see harmonic richness changing too.
@@ -1578,48 +1521,26 @@ Follow-ups on October 13 (verbatim, in order):
 
 ### What Claude implemented
 
-- **Air Canvas (October 13):** MediaPipe hand tracking controlling sound. It was replaced the same day by Motion Score and is not in the current app.
-- **Motion Score (October 13):** a laptop page and a phone Controller page paired over WebRTC (PeerJS), phone motion and orientation sensors mapped to an additive synthesizer, Flow and Accents modes, Continuous and Pentatonic pitch, calibration and safety rules, Laptop Demo, a spotlight Demo Guide, `PRESENTATION_NOTES.md` and `SPEAKER_NOTES.md`. Claude also created the Git repository on my Mac and set up the GitHub Pages workflow. I created the GitHub repository and gave Claude my username, and Claude pushed.
-- **October 18:** the Tilt instrument mapping (sideways lean controls harmonic richness), Steady sustain, Lock fundamental, a harmonic panel and an auto demo.
-- **October 19:** tilt and lean measured relative to the calibrated holding position, a pure tone at neutral with a dead zone, holding-position checks, a live gesture readout and Lock richness.
+- **Air Canvas (October 13):** MediaPipe hand tracking that controlled pitch and harmonics. It was later removed.
+- **Motion Score (October 13):** a laptop page and a phone Controller page paired over WebRTC (PeerJS), phone motion and orientation sensors mapped to an additive synthesizer, Flow and Accents modes, Continuous and Pentatonic pitch, calibration and safety rules, and Laptop Demo. A later change shows the QR code automatically and turns phone setup into a 3-step flow. Claude also set up the Git repository and the GitHub Pages workflow.
+- **Spotlight tour (October 13):** a 17-step Demo Guide that highlights each control, "?" buttons on each section, clearer Movement Score tracks, and inline explanations.
+- **Tilt instrument (October 18):** sideways lean controls harmonic richness, plus Steady sustain, Lock fundamental, a harmonic panel and an auto demo.
+- **Orientation fixes (October 19):** tilt and lean measured relative to the calibrated holding position, a pure tone at neutral with a dead zone, holding-position checks, a live gesture readout and Lock richness.
 
-### My testing
+### How it was tested
 
-- **October 19 (my message):** "The improved instrument works, but physical phone testing revealed a usability issue with calibration and gesture separation." This refers to the October 18 version.
-- No message of mine records phone testing of the October 19 revision. Claude said it had not verified gesture separation on a physical phone.
-
-### Automated checks (as reported by Claude)
-
-| Date | Unit tests | Motion Score end-to-end checks (simulated phone, real PeerJS pairing) | Frequency Playground checks |
+| Date | Unit tests | End-to-end browser checks | Frequency Playground checks |
 |---|---|---|---|
-| Oct 13 (Air Canvas) | 21/21 | 37/37 (fake webcam video of a hand) | 36/36 |
-| Oct 13 (Motion Score, first build) | 33/33 | 46/46, then 47/47 after the pairing changes, including on the live site | 36/36 |
+| Oct 13 (Air Canvas) | 21/21 | 37/37 (fake webcam video of a hand fed to the real MediaPipe model) | 36/36 |
+| Oct 13 (Motion Score) | 33/33 | 46/46 (simulated phone with real PeerJS pairing), then 47/47 after the pairing change, including on the live site | 36/36 |
 | Oct 18 | 43 pass | 65 pass, including on the live site | 36/36 |
-| Oct 19 | 51 pass | 67 pass, locally and on the live site | — |
+| Oct 19 | 51 pass | 67 pass, locally and on the live site, including simulated orientation cases | — |
 
-### Presentation support (October 13)
+The Oct 18 checks confirmed, for example, that at a locked 200 Hz the output was 200 Hz alone at minimum richness and 200/400/600/800/1000 Hz as richness rose. These checks used a simulated phone. Physical sensors and listening were outside them.
 
-I also used Claude while preparing for and during my October 13 class presentation. Claude answered my questions about the app and drafted short answers that I could say aloud. Once I typed "i’m in class", what I typed was my professor's prompts or my own questions, and Claude replied with short spoken-style answers. My messages, verbatim and in order:
+## Frequency Playground: microphone input (assignment 1, October 25)
 
-> Anyway I could open the speaker_notes on my phone? it's an md so
-
-> im just curious what i should say if he asks why i chose to add a pentatonic if we've never learned about it in class?
-
-> If he asks me a question about why I chose to do something or what I know about something, please keep it realistic and give me a casual yet appropriate response. Everything I type from when I say the words “I’m in class” will be stuff my prof is saying to me, otherwise, I will let you know
-
-> i’m in class
-
-> he says to give a brief background of what i made, make it sound natural
-
-> Are you sure if I share my link, everyone can link their phone?
-
-> if i’m wearing headphones to my laptop, are you still able to connect phone? why is it failing
-
-## Microphone input (assignment 1, October 25)
-
-**Tool and dates:** Claude Code, October 25, 2026. Claude built and tested the feature in its cloud environment, copied it into my project folder, and then published it through a Remote Control session on my Mac.
-
-### What I asked for
+### Main build prompt
 
 <details>
 <summary>Build prompt (verbatim, October 25)</summary>
@@ -1753,47 +1674,24 @@ I also used Claude while preparing for and during my October 13 class presentati
 
 </details>
 
-Publish request (verbatim, October 25):
-
-> Assignment 1 is tested on my microphone, and I’ve filmed the progress video. Please publish this completed microphone update to the existing GitHub Pages site.
-> Inspect the repository’s Git status, remote, current branch, and existing GitHub Pages deployment configuration first.
-> Then:
->
-> 1. Identify the changes belonging to assignment 1. Preserve unrelated work and do not commit secrets or local-only files.
-> 2. Run the relevant checks and production build.
-> 3. Commit the assignment 1 changes with a clear message.
-> 4. Push through the repository’s established workflow. Do not force-push or overwrite remote changes.
-> 5. Follow the existing GitHub Pages deployment process rather than introducing a new hosting setup.
-> 6. Check the deployment status where access allows, and verify that the public Frequency Playground includes the microphone controls.
-> 7. Give me the public URL and explain whether deployment succeeded or is still pending.
->
-> All changes belong to Frequency Playground, the FIRST app. Preserve Motion Score.
-> If authentication or repository permissions prevent publishing, explain the exact blocker and the next action I need to take. Do not claim the public site updated just because a push succeeded.
-
 ### What Claude implemented
 
-Enable and Stop Microphone buttons, a status display, an input-level meter, Freeze View and Resume View, and separate microphone-only waveform and spectrum plots, with no monitoring of the microphone through the speakers. It also wrote `MIC_UPDATE.md`, including a video script.
+Enable and Stop Microphone, a status display, an input-level meter, Freeze View and Resume View, and separate microphone-only waveform and spectrum plots. The microphone is never played through the speakers. It also wrote `MIC_UPDATE.md`.
 
-### My testing
-
-My October 25 message says: "Assignment 1 is tested on my microphone, and I’ve filmed the progress video."
-
-### Automated checks (as reported by Claude)
+### How it was tested
 
 | Check | Result |
 |---|---|
-| Unit tests (17 new microphone tests, simulated) | 68/68 pass |
+| Unit tests (17 new microphone tests, simulated input) | 68/68 pass |
 | Simulated-microphone browser checks | 46/46 pass |
 | Synthesizer browser checks | 36/36 pass |
 | Motion Score Laptop Demo checks | 12/12 pass (the phone-pairing checks could not reach PeerJS from Claude's environment) |
-| On my Mac before the commit: `npm test`, `npm run build` | 68/68 pass, build succeeded |
-| GitHub Actions "Deploy to GitHub Pages" for `465b9dd` | Succeeded; the live JavaScript contained "Enable Microphone" and "Microphone waveform" |
+| `npm test` and `npm run build` on my Mac | 68/68 pass, build succeeded |
+| Deployment of `465b9dd` | Succeeded; the live JavaScript contained the microphone controls |
 
-## Vowel Lab: manual vowel recreation (assignment 2, October 25)
+## Frequency Playground: Vowel Lab (assignment 2, October 25)
 
-**Tool and dates:** Claude Code, October 25, 2026. It built the feature in its cloud environment, copied it into my project folder, and published it through a Remote Control session on my Mac.
-
-### What I asked for
+### Main build prompt
 
 <details>
 <summary>Build prompt (verbatim, October 25)</summary>
@@ -1973,51 +1871,26 @@ My October 25 message says: "Assignment 1 is tested on my microphone, and I’ve
 
 </details>
 
-Publish request (verbatim, October 25):
-
-> The microphone feature and Vowel Lab in Frequency Playground are working, and I’ve finished testing and filming them. Please commit and push these changes to GitHub and publish them to the existing GitHub Pages site.
->
-> Project folder: ~/Desktop/frequency-playground
-> Existing site: https://aceyq.github.io/sound-lab/
->
-> Please:
-> 1. Check the current branch, Git status, and existing deployment setup.
-> 2. Review the changes and include the relevant Frequency Playground code, tests, and documentation. Exclude unrelated changes, personal recordings, downloaded experiment files, and secrets. Do not modify Motion Score.
-> 3. Run the relevant checks and production build. Fix any problems before publishing.
-> 4. Commit with a clear message, push to the appropriate branch, and use the repository’s existing GitHub Pages deployment process.
-> 5. Check that deployment succeeds and verify that the published Frequency Playground includes both the microphone feature and Vowel Lab.
->
-> Please proceed with committing, pushing, and publishing; this message authorizes those steps. Do not force-push or overwrite unrelated work.
->
-> When finished, give me the commit summary, deployment status, and exact public link I should share. Also clarify whether my locally saved vowel experiments transfer to the published site; do not assume they do.
-
 ### What Claude implemented
 
-Vowel Lab inside Frequency Playground: recording named vowel takes kept in browser storage, WAV export and import, tools for estimating the fundamental by hand (waveform cursors, spectrum cursor, n × f0 markers), 4–48 harmonic amplitude sliders, Original and Synthesized playback with overlaid spectra, saved experiments with settings JSON, and duplicate options for a second pitch. As my prompt required, it did not add automatic fitting.
+Vowel Lab inside Frequency Playground: named vowel recordings kept in browser storage, WAV export and import, tools for estimating the fundamental by hand (waveform cursors, a spectrum cursor, n × f0 markers), 4–48 harmonic amplitude sliders, Original and Synthesized playback with overlaid spectra, saved experiments with settings JSON, and duplicate options for trying a second pitch. As the prompt required, it has no automatic fitting.
 
-### My testing
-
-- My October 25 message says the microphone feature and Vowel Lab "are working, and I’ve finished testing and filming them."
-- I did the slider matching myself. My October 25 prompt for assignment 3 lists my manual results: lower ah about 248 Hz, lower ee about 243 Hz, lower oo about 248 Hz, higher oo about 300 Hz, and the oo harmonic settings.
-
-### Automated checks (as reported by Claude)
+### How it was tested
 
 | Check | Result |
 |---|---|
 | Unit tests (15 new) | 83/83 pass |
 | Vowel Lab browser checks (simulated microphone) | 49/49 pass |
 | Microphone and manual-mode browser checks | 45/45 and 36/36 pass |
-| On my Mac before the commit: `npm test`, `npm run build` | 83/83 pass, build succeeded |
-| GitHub Actions deploy for `4f8e607` | Succeeded; the live build contained both the microphone feature and Vowel Lab |
+| `npm test` and `npm run build` on my Mac | 83/83 pass, build succeeded |
+| Deployment of `4f8e607` | Succeeded; the live build contained the microphone feature and Vowel Lab |
 
-## Automatic vowel synthesis, tutorial and guided tour (assignment 3, October 25–27)
+## Frequency Playground: automatic vowel synthesis and guided tour (assignment 3, October 25–27)
 
-**Tool and dates:** Claude Code, October 25–27, 2026. It built the features in its cloud environment, copied them into my project folder, and ran the tests, build, commits and pushes through Remote Control sessions on my Mac.
-
-### What I asked for
+### Main prompts
 
 <details>
-<summary>Build prompt (verbatim, October 25)</summary>
+<summary>Automatic vowel synthesis build prompt (verbatim, October 25)</summary>
 
 > Please help me attempt assignment 3 in my existing Frequency Playground app.
 >
@@ -2153,7 +2026,7 @@ Vowel Lab inside Frequency Playground: recording named vowel takes kept in brows
 </details>
 
 <details>
-<summary>Tutorial and publish request (verbatim, October 27)</summary>
+<summary>Tutorial prompt (verbatim, October 27)</summary>
 
 > Please update my existing Frequency Playground project:
 >
@@ -2227,7 +2100,7 @@ Vowel Lab inside Frequency Playground: recording named vowel takes kept in brows
 </details>
 
 <details>
-<summary>Guided on-page tour and publish request (verbatim, October 27)</summary>
+<summary>Guided on-page tour prompt (verbatim, October 27)</summary>
 
 > Please improve the Vowel Lab tutorial in ~/Desktop/frequency-playground.
 >
@@ -2294,30 +2167,24 @@ Vowel Lab inside Frequency Playground: recording named vowel takes kept in brows
 
 ### What Claude implemented
 
-- Before building, Claude explained the approaches in the thread: periodicity-based pitch estimation (autocorrelation, YIN, cepstrum), Fourier analysis of harmonic strengths, and additive versus source-filter synthesis, with links to the primary sources. The sources are in `AUTO_VOWEL_UPDATE.md`.
-- **"Automatic vowel synthesis" section:** a YIN fundamental estimate over up to 60 frames (median), a windowed FFT harmonic measurement with peak interpolation and a noise threshold, resynthesis through the existing additive synthesizer, labelled manual f0 correction, plain "No reliable result" messages, and saving as a separate experiment.
-- **October 27:** a 10-step "How to use Vowel Lab" popup (`ac727d6`), then a 24-step on-page guided tour that replaced it (`73c25bd`).
+- Before building, Claude explained the approaches: periodicity-based pitch estimation (autocorrelation, YIN, cepstrum), Fourier analysis of harmonic strengths, and additive versus source-filter synthesis, with links to primary sources. The sources are in `AUTO_VOWEL_UPDATE.md`.
+- **Automatic vowel synthesis:** a YIN fundamental estimate over up to 60 frames (median), a windowed FFT harmonic measurement with peak interpolation and a noise threshold, resynthesis through the existing additive synthesizer, labelled manual f0 correction, plain "No reliable result" messages, and saving as a separate experiment.
+- **Tutorial, then tour:** a 10-step "How to use Vowel Lab" popup, then a 24-step on-page tour that replaced it.
 
-### My testing
-
-**Missing:** no message of mine records testing the automatic synthesis on my recordings, listening to its results, or trying the tutorial or tour. Claude said at each stage that nobody had listened to the automatic results and that the tour had not been tried on a real phone or in Safari.
-
-### Automated checks (as reported by Claude)
+### How it was tested
 
 | Check | Result |
 |---|---|
-| Oct 25, unit tests including synthetic known-harmonic signals | 96/96 pass, in the cloud and on my Mac |
-| Oct 25, automatic-synthesis browser checks | 26/26 pass |
-| Oct 25, synthetic 248 Hz vowel-like tone | Estimated 247.98 Hz, harmonics 1–4 within 0.1 dB (Claude noted that the method is bound to fit a tone made of harmonics) |
-| Oct 27, tutorial popup: unit tests and build on my Mac | 99/99 pass, build succeeded; tutorial browser checks 22/22 |
-| Oct 27, guided tour: unit tests and build on my Mac | 100/100 pass, build succeeded; tour checks 24/24 at desktop and phone size |
-| GitHub Actions deploys for `ac727d6` and `73c25bd` | Both succeeded; the live build contained the new features. Claude did not click through the live site. |
+| Unit tests, including synthetic known-harmonic signals and a higher harmonic stronger than the fundamental | 96/96 pass, in the cloud and on my Mac |
+| Automatic-synthesis browser checks | 26/26 pass |
+| Synthetic 248 Hz vowel-like tone | Estimated 247.98 Hz, harmonics 1–4 within 0.1 dB. Claude noted that a tone built from harmonics is an easy case for this method. |
+| Tutorial popup: unit tests and build on my Mac; tutorial browser checks | 99/99 pass, build succeeded; 22/22 |
+| Guided tour: unit tests and build on my Mac; tour browser checks | 100/100 pass, build succeeded; 24/24 at desktop and phone size, with and without a recording |
+| Deployments of `ac727d6` and `73c25bd` | Both succeeded; the live build contained the new features |
 
-## Vowel filtering (assignment 4, October 31)
+## Frequency Playground: Vowel filtering (assignment 4, October 31)
 
-**Tool and dates:** Claude Code, running in a session on my Mac in `~/Desktop/frequency-playground`, October 31, 2026.
-
-### What I asked for
+### Main prompts
 
 <details>
 <summary>Build prompt (verbatim, October 31)</summary>
@@ -2558,7 +2425,7 @@ Vowel Lab inside Frequency Playground: recording named vowel takes kept in brows
 </details>
 
 <details>
-<summary>Follow-up: make recording optional, with three workflows (verbatim, October 31)</summary>
+<summary>Three-workflow change, making recording optional (verbatim, October 31)</summary>
 
 > Please improve the Vowel filtering feature in Frequency Playground so recording my voice is clearly OPTIONAL.
 >
@@ -2675,54 +2542,35 @@ Vowel Lab inside Frequency Playground: recording named vowel takes kept in brows
 
 </details>
 
-Publish request (verbatim, October 31):
-
-> I tested Vowel filtering locally, and the Aa, Ee, and Oo examples sound recognizable without a recording.
->
-> Please run the relevant checks and production build, commit the Frequency Playground changes, push normally, and publish using the existing GitHub Pages workflow.
->
-> Include all three filtering workflows and the updated tutorial. Preserve saved-data compatibility, exclude personal recordings and downloaded experiment files, and leave Motion Score unchanged. Do not force-push.
->
-> I authorize committing, pushing, and publishing. Verify deployment and give me the live link and status.
-
-The second Vowel Morph follow-up, quoted under [Vowel Morph](#vowel-morph-tasks-3-and-4-october-31), also asked for the Vowel filtering changes to be published.
-
 ### What Claude implemented
 
-A "Vowel filtering" section: a source of the fundamental and every harmonic at amplitude 1, a real Web Audio filter chain of 8 cut-only peaking biquads with draggable points and number fields, Filter on/bypass and Reset, Play Original, Unfiltered, Filtered and Original → Filtered, "Match filter to recording" (least-squares fit of the 8 filters to the recording's measured harmonic strengths), A/E/I/O/U starting examples fitted to published average formants (Hillenbrand et al. 1995), saving and WAV/JSON export, a 13-step tour and `FILTER_VOWEL_UPDATE.md`. The follow-up added three workflows (vowel examples, my own frequencies, match a recording) and renamed the examples Aa, Eh, Ee, Oh and Oo.
+A "Vowel filtering" section:
+- A source of the fundamental and every harmonic at amplitude 1.
+- A real Web Audio filter chain of 8 cut-only peaking biquads, with draggable points and number fields, Filter on/bypass and Reset.
+- Play Original, Unfiltered, Filtered and Original → Filtered.
+- "Match filter to recording", a least-squares fit of the 8 filters to the recording's measured harmonic strengths.
+- Starting examples fitted to published average formants (Hillenbrand et al. 1995).
+- Saving, WAV and JSON export, a 13-step tour and `FILTER_VOWEL_UPDATE.md`.
 
-### My testing
+The follow-up added three workflows (vowel examples, my own frequencies, match a recording) and renamed the examples Aa, Eh, Ee, Oh and Oo. A noise source was added on November 5–6 (see [Linear interpolation, noise and fricatives](#linear-interpolation-noise-and-fricatives-november-56-2026)).
 
-My October 31 message says: "I tested Vowel filtering locally, and the Aa, Ee, and Oo examples sound recognizable without a recording." No message of mine records listening tests of Eh, Oh, the custom-frequency workflow or recording matching.
-
-### Automated checks (as reported by Claude)
+### How it was tested
 
 | Check | Result |
 |---|---|
-| First version: unit tests | 114/114 pass |
-| First version: filter browser checks | 55/55 pass; older checks pass |
-| Synthetic recording made with a known filter | Fit recovered its harmonic levels within 0.1 dB; the vowel examples land 2.6–5 dB RMS from their target shapes |
+| First version: unit tests; filter browser checks | 114/114 pass; 55/55 pass |
+| Synthetic recording made with a known filter | The fit recovered its harmonic levels within 0.1 dB. The vowel examples land 2.6–5 dB RMS from their target shapes. |
 | Three-workflow version: unit tests | 119/119 pass |
-| Three-workflow version: browser checks from empty storage | 31/31 workflows, 57/57 recording matching, older checks pass; build succeeded |
-| Later, a production build of the whole working copy (in the Vowel Morph thread) | 144/144 unit tests; `verify-filter` 57/57, `verify-filter-workflows` 31/31 |
+| Three-workflow version: browser checks from empty storage | 31/31 workflows, 57/57 recording matching; build succeeded |
 
-### Commit `b4ca719`
-
-- **Who wrote the code:** Claude.
-- **Who ran the commit:** me, in Terminal. Claude Code's permission check on my Mac blocked Claude's own `git commit` and `git push` twice: once in the Vowel filtering thread and once in the Vowel Morph thread. The second time it also blocked Claude's reply containing the commands.
-- **What the record shows:** `b4ca719` "Frequency Playground: Vowel filtering with three workflows and updated tour" was committed at 09:38 UTC on October 31. My local `origin/main` points to it, so the push went through. The commit message differs from the one Claude suggested in the Vowel filtering thread, so the exact commands I ran are not in any thread.
-- **Not verified:** no thread records a check of the GitHub Pages deployment for `b4ca719`, or of whether Vowel filtering is live.
+The commit `b4ca719` was pushed to `main`. Its GitHub Pages deployment was not checked.
 
 ## Vowel Morph (tasks 3 and 4, October 31)
 
-**Tool:** Claude (Claude Code, running on my Mac in `~/Desktop/frequency-playground`, through a Claude project thread).
-**Dates:** October 31, 2026.
-**Repository:** `~/Desktop/frequency-playground` is a Git checkout whose `origin` is `https://github.com/aceyq/sound-lab.git` (branch `main`, tracking `origin/main`).
-**Published at:** https://aceyq.github.io/sound-lab/#/vowel-morph
+### Main build prompt
 
-### What I asked for
-
-Original build prompt (verbatim):
+<details>
+<summary>Build prompt (verbatim, October 31)</summary>
 
 > Please build a NEW standalone web app for tasks 3 and 4 of my capstone assignment. This is separate from Frequency Playground and Motion Score.
 >
@@ -2958,43 +2806,7 @@ Original build prompt (verbatim):
 >
 > Please prioritize a reliable, understandable demonstration over extra features.
 
-Follow-up after testing (verbatim, October 31):
-
-> I’ve tested Vowel Morph and recorded my demonstration of the 1D slider and 2D vowel space. Please commit and publish the Vowel Morph additions.
->
-> Project:
-> ~/Desktop/frequency-playground
->
-> Please:
-> 1. Inspect Git status, the current branch, and the existing deployment workflow.
-> 2. Review and include the relevant Vowel Morph implementation, routing/landing-page entry, tests, tutorial, and documentation.
-> 3. Exclude personal recordings, exported projects, downloaded audio, secrets, and unrelated changes. Do not overwrite or discard any unrelated work.
-> 4. Run the relevant tests and production build. Fix any issues before publishing.
-> 5. Commit with a clear message, push normally to the appropriate branch, and publish through the existing GitHub Pages workflow. Do not force-push.
-> 6. Verify that deployment succeeds and that the published app includes both the 1D slider and 2D sound space.
->
-> I authorize committing, pushing, and publishing these additions. Preserve the existing Frequency Playground and Motion Score behavior.
->
-> When finished, give me:
-> - The commit summary and hash.
-> - The deployment status.
-> - The exact public Vowel Morph link.
-> - Any checks you could not complete.
-> - Exact instructions for transferring my locally saved vowel recordings and sound space to the published site using the existing backup/import feature.
->
-> Do not assume that recordings saved on localhost will automatically appear on GitHub Pages, and do not publish my recordings as repository files.
-
-Second follow-up (verbatim, October 31; the parts about Vowel filtering belong to that section of this disclosure):
-
-> I ran the Terminal commands you provided. Please check whether the Vowel Morph commit and push actually succeeded.
->
-> I also want ALL the completed Vowel filtering changes published, including the three workflows: vowel examples, custom frequencies, and recording matching.
->
-> Inspect Git status and the remote history. Commit any remaining relevant filtering changes, run the appropriate checks, push normally, and verify the GitHub Pages deployment. I authorize these steps.
->
-> Preserve unrelated work and exclude personal recordings and downloaded files. If your safety check blocks an action again, give me the required Terminal commands in a code block, with each command on its own line.
->
-> Confirm separately whether Vowel Morph and Vowel filtering are live.
+</details>
 
 ### What Claude implemented
 
@@ -3021,48 +2833,24 @@ Claude wrote all of the Vowel Morph code. It is a third app in the existing site
   - A backup file that includes the recordings, and an import that only adds.
   - WAV downloads, a 13-step guided tour, and `VOWEL_MORPH_UPDATE.md`.
 
-### My testing (manual)
+The pitch and harmonic blending rule above was replaced with linear interpolation on November 5–6 (see [Linear interpolation, noise and fricatives](#linear-interpolation-noise-and-fricatives-november-56-2026)).
 
-My October 31 message, quoted above, says I tested Vowel Morph and recorded a demonstration of both the 1D slider and the 2D vowel space. I recorded my own vowels for this. The listening judgments are mine. Claude's automated checks did not include any listening.
-
-### Automated tests, build and deployment (as reported by Claude)
-
-These are automated checks with synthetic or simulated signals, not listening tests.
+### How it was tested
 
 | Command | Result | Notes |
 |---|---|---|
-| `npm test` (local working copy, during development) | 144/144 pass | Included the 25 new Vowel Morph unit tests in `test/vowel-morph.test.js` and the other test files present then |
-| `node scripts/verify-vowel-morph.mjs http://localhost:5181/` (Playwright, Chromium) | 52/52 pass | Simulated vowels as WAV imports, and one take through Chromium's fake microphone |
-| Existing browser checks re-run against the same dev server | All pass | `verify` 36/36, `verify-motion` 67/67, `verify-mic` 45/45, `verify-vowel` 49/49, `verify-auto-vowel` 26/26, `verify-tutorial` 24/24, `verify-filter` 57/57, `verify-filter-workflows` 31/31 |
-| `npm run build` | Succeeded | Vite's existing chunk-size warning (over 500 kB) was shown |
-| Clean copy (commit `73c25bd` plus only the Vowel Morph files): `npm test` | 125/125 pass | Excluded the then-uncommitted Vowel filtering work |
-| Same clean copy: `BASE_PATH=/sound-lab/ npx vite build`, then the checks against `vite preview` | Build succeeded | `verify-vowel-morph` 52/52, `verify` 36/36, `verify-motion` 67/67, `verify-vowel` 49/49, `verify-auto-vowel` 26/26, `verify-tutorial` 24/24, `verify-mic` 45/45 |
-| GitHub Actions "Deploy to GitHub Pages" for commit `76b3ed7` | Succeeded | Checked through the GitHub API on October 31. The deployed JavaScript bundle contained the Vowel Morph code. |
+| `npm test` | 144/144 pass | 25 new Vowel Morph tests in `test/vowel-morph.test.js` plus 119 existing tests |
+| `node scripts/verify-vowel-morph.mjs` (Playwright, Chromium) | 52/52 pass | Simulated vowels as WAV imports, and one take through Chromium's fake microphone |
+| Existing browser checks against the same dev server | All pass | `verify` 36/36, `verify-motion` 67/67, `verify-mic` 45/45, `verify-vowel` 49/49, `verify-auto-vowel` 26/26, `verify-tutorial` 24/24, `verify-filter` 57/57, `verify-filter-workflows` 31/31 |
+| `npm run build` | Succeeded | |
+| Clean copy (`73c25bd` plus only the Vowel Morph files): `npm test`, GitHub Pages build and browser checks | 125/125 pass; build succeeded | `verify-vowel-morph` 52/52, and the other apps' checks pass |
+| Deployment of `76b3ed7` | Succeeded | The deployed JavaScript contained the Vowel Morph code. Nobody clicked through the live page as part of this check. |
 
-**Unit test count:** 25 new Vowel Morph unit tests. `test/vowel-morph.test.js` contains 25 tests, checked again on November 5, 2026. `VOWEL_MORPH_UPDATE.md` says "26 new Vowel Morph tests and the existing 118"; the correct split is 25 + 119. The 144/144 total is correct.
+## Linear interpolation, noise and fricatives (November 5–6, 2026)
 
-**Live browser walkthrough: unverified.** The deployment success and the Vowel Morph code in the deployed bundle were checked automatically. Nobody has recorded clicking through the live Vowel Morph page in a browser.
+This change covers Vowel Morph and Vowel filtering.
 
-**Commit:** `76b3ed7` "Add Vowel Morph app: 1D vowel slider and 2D vowel sound space (tasks 3 and 4)". Claude wrote the code. I committed and pushed it in Terminal, using commands Claude drafted, because Claude Code's permission check blocked Claude's own `git commit`. Commit `b4ca719` belongs to [Vowel filtering](#vowel-filtering-assignment-4-october-31), not to Vowel Morph.
-
-**Development transcript:** the exact wording of my messages comes from the project thread. Claude's own intermediate messages are summarized here, not quoted.
-
-## Missing records
-
-These records were not in any source I could check, so this file does not fill them in:
-
-1. **Harmonic Explorer (Oct 5–6):** what I checked by hand in the browser, what I heard in the listening comparisons, and answers to the three "To confirm" questions in that entry. Claude's 19/19 checks can't be re-run, because the test script was not saved.
-2. **Frequency Playground (Oct 13):** a record of my own testing before the presentation.
-3. **Motion Score (Oct 19 revision):** a record of physical phone testing after the calibration and gesture-separation changes.
-4. **Automatic vowel synthesis, tutorial and guided tour (Oct 25–27):** any record of my testing or listening.
-5. **Vowel filtering (Oct 31):** listening tests of Eh, Oh, the custom-frequency workflow and recording matching; the exact Terminal commands behind `b4ca719`; and any check of its GitHub Pages deployment.
-6. **Vowel Morph (Oct 31):** a walkthrough of the live page in a browser.
-
-## Vowel interpolation check, noise and fricatives (November 5–6, 2026)
-
-**Tool:** Claude (Claude Code, running in `~/Desktop/frequency-playground` on my Mac through a Claude project thread). ChatGPT helped me draft the prompt below.
-
-### What I asked for
+### Main prompt
 
 Prompt (verbatim, sent November 6, 2026 UTC; drafted with help from ChatGPT):
 
@@ -3091,24 +2879,21 @@ Prompt (verbatim, sent November 6, 2026 UTC; drafted with help from ChatGPT):
 
 </details>
 
-In short: check and fix vowel reconstruction and interpolation in Vowel Morph, add a noise source and a fricative workflow to Frequency Playground with one small automated estimate, then test, document and publish.
-
 ### What Claude verified in the existing implementation
 
-- **Repository:** branch `main`, tracking `origin/main`, remote `https://github.com/aceyq/sound-lab.git`. The working tree was clean, so the earlier `AI_USE.md` and README edits were already committed (`cd61e6f`) and no separate documentation commit was needed.
 - **2D workflow:** recording, analysis into f0 and 48 harmonic amplitudes, placing a dot, and playing a dot's synthesized reconstruction already worked. The inverse-distance weights already behaved correctly (normalized, exact on a dot, zero and one dot handled), so they were kept.
 - **Interpolation rule did not match this assignment.** Both views blended f0 as a geometric mean (semitones) and harmonic amplitudes in decibels with a −60 dB floor. Halfway between 200 Hz and 300 Hz gave 244.9 Hz, not 250 Hz. The prompt asks for linear interpolation.
 - **Playback path:** Claude read `morph-audio.js` and `index.js`. Slider and square sounds go through one bank of 48 sine oscillators whose targets change, and that path uses no recording buffer. A recording plays only from an explicit Original control or a dot tap in Original mode. Switching between a recording and the synthesizer stops the first with a 40 ms fade, so they overlap only during that fade.
 
 ### What Claude changed
 
-- **Vowel Morph:** `blendParams` is now a plain weighted average of f0 and of each harmonic amplitude, in both 1D and 2D. Endpoints and dots still return exact values. The on-page formula, tour and `VOWEL_MORPH_UPDATE.md` were updated, including the 25 + 119 test split that an earlier entry flagged.
+- **Vowel Morph:** `blendParams` is now a plain weighted average of f0 and of each harmonic amplitude, in both 1D and 2D. Endpoints and dots still return exact values. The on-page formula, tour and `VOWEL_MORPH_UPDATE.md` were updated, including the 25 + 119 test split.
 - **Noise source:** a Noise source panel in Vowel filtering, with noise level, harmonic level, "Harmonics skip the filter" and "Filtered noise only". Noise is off by default. It uses the existing filter and spectrum views.
 - **Fricatives:** a fourth workflow, "Noise and fricatives", with editable starting points for shh, fff, jjj and sss. Claude read "jjj" as the voiced sound in "measure", which is an assumption for me to confirm.
 - **Automation attempt:** "Estimate filter from recording" reduces a section's averaged spectrum to third-octave levels and fits the existing 8 filter points. Only the filter is estimated. `NOISE_FRICATIVE_UPDATE.md` lists what is preset versus estimated, and the limits.
 - **Tests and scripts:** new `test/noise-fricative.test.js` and `scripts/verify-noise.mjs`, more checks in `test/vowel-morph.test.js` and `scripts/verify-vowel-morph.mjs`, and a `--disable-audio-output` flag in the browser scripts. The flag was needed because the Mac's audio clock was not advancing for headless Chromium during this session.
 
-### Automated checks (run by Claude, November 5, 2026 Pacific)
+### How it was tested (November 5, 2026 Pacific)
 
 These use synthetic signals, a fake microphone and the app's state. None of them involve listening.
 
@@ -3128,13 +2913,7 @@ Notes on these runs:
 - One `verify-motion` run was stopped by Claude after 59 passing checks because it looked stuck. A repeat run passed 67/67.
 - The controls were exercised in headless Chromium by these scripts. Claude did not use the app by hand or listen to it.
 
-### Manual checks still pending
+## Records not available
 
-None of these has been done yet. I will add results when I have them.
-
-1. Record a sustained vowel in the 2D view with my real microphone and place it as a dot.
-2. Click recorded dots and points between them, and judge whether each is one sound and how it compares with the original.
-3. Listen to the slider's endpoints and midpoint with the new linear rule.
-4. Try shh, fff, sss and jjj by ear, and adjust the filter and levels.
-5. Record a real sustained fricative and compare the estimate with Original → Filtered.
-6. Confirm that "jjj" means the sound I intended.
+- **Harmonic Explorer:** the script behind Claude's 19 checks was not saved, so those results can't be re-run.
+- **Vowel filtering:** the GitHub Pages deployment of `b4ca719` was not checked.

@@ -39,7 +39,7 @@ Live: https://aceyq.github.io/sound-lab/#/motion-score
   2. 200 Hz held while the harmonics fade in.
   3. The harmonic balance held while the pitch moves.
 - **Laptop Demo controls.** Laptop Demo also has manual sliders for forward/back tilt, sideways lean and movement intensity.
-- **Updated text.** The tour (21 steps), help text, phone instructions with a drawing, PRESENTATION_NOTES.md and SPEAKER_NOTES.md all describe the new mapping.
+- **Updated text.** The tour (21 steps), help text, phone instructions with a drawing and SPEAKER_NOTES.md all describe the new mapping.
 
 ### Checks actually performed
 
@@ -137,7 +137,7 @@ See SPEAKER_NOTES.md → "Part 2 · Motion Score" for the full version with clic
 - **Smoother fades.** Each harmonic now fades in over an overlapping stretch, so the timbre changes more gradually.
 - **Live gesture readout** under the value cards: forward/back tilt in degrees, sideways lean in degrees (inside or past the dead zone), richness, and the position check. The phone shows the same numbers.
 - **Lock richness** holds the current harmonic recipe while you demonstrate pitch. It complements Lock fundamental.
-- **Updated guidance.** The tour, phone instructions and illustration, the auto demo (step 3 now uses Lock richness), PRESENTATION_NOTES.md and SPEAKER_NOTES.md all describe this mapping.
+- **Updated guidance.** The tour, phone instructions and illustration, the auto demo (step 3 now uses Lock richness) and SPEAKER_NOTES.md all describe this mapping.
 - **Unchanged:** the Movement intensity mapping still works as before, and now also uses the better pitch measurement when available.
 
 ### Checks actually performed

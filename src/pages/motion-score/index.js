@@ -1,6 +1,6 @@
 // Motion Score: laptop Performance page.
 // A phone's motion sensors (or Laptop Demo sliders) control an additive
-// synthesizer that runs here. See PRESENTATION_NOTES.md for the full guide.
+// synthesizer that runs here.
 
 import QRCode from 'qrcode';
 import { h, fmtHz } from '../../lib/dom.js';
