@@ -19,6 +19,7 @@
 //              missing from a vowel counts as 0.
 // With one weight equal to 1 the result is exactly that vowel's numbers.
 import { MAX_HARMONICS, F0_MIN, F0_MAX, renderRecipe, newId, uniqueName } from '../frequency/vowel-model.js';
+import { cleanTake } from './take-model.js';
 
 export const HARMONICS = MAX_HARMONICS; // 48, the same as the Vowel Lab analysis
 export const FLOOR_DB = -60; // lowest level the harmonic bars show
@@ -247,7 +248,7 @@ export function strongestHarmonic(amps) {
 export const PROJECT_FORMAT = 'vowel-morph.project';
 
 export function emptyProject() {
-  return { format: PROJECT_FORMAT, version: 1, vowels: [], pair: { a: null, b: null }, slider: 0, pitchMode: 'blend', space: { power: DEFAULT_POWER, point: { x: 0.5, y: 0.5 } } };
+  return { format: PROJECT_FORMAT, version: 1, vowels: [], takes: [], pair: { a: null, b: null }, slider: 0, pitchMode: 'blend', space: { power: DEFAULT_POWER, point: { x: 0.5, y: 0.5 } } };
 }
 
 export function makeVowel(p = {}) {
@@ -281,6 +282,7 @@ export function loadProject(raw) {
   const p = emptyProject();
   if (!raw || typeof raw !== 'object') return p;
   p.vowels = Array.isArray(raw.vowels) ? raw.vowels.filter((v) => v && typeof v === 'object').map(makeVowel) : [];
+  p.takes = Array.isArray(raw.takes) ? raw.takes.map(cleanTake).filter(Boolean) : [];
   const ids = new Set(p.vowels.map((v) => v.id));
   p.pair = { a: raw.pair && ids.has(raw.pair.a) ? raw.pair.a : null, b: raw.pair && ids.has(raw.pair.b) ? raw.pair.b : null };
   p.slider = clamp01(Number(raw.slider) || 0);
@@ -322,7 +324,7 @@ export function base64ToFloats(b64) {
 
 /** The backup document: project settings plus every recording it uses. */
 export function makeBackup(project, recordings) {
-  const used = new Set(project.vowels.map((v) => v.recordingId).filter(Boolean));
+  const used = new Set([...project.vowels, ...(project.takes || [])].map((v) => v.recordingId).filter(Boolean));
   return {
     format: BACKUP_FORMAT,
     version: 1,
@@ -375,8 +377,15 @@ export function parseBackup(doc, existingNames = []) {
     names.push(v.name);
     vowels.push(v);
   }
+  const takes = [];
+  for (const raw of Array.isArray(doc.project.takes) ? doc.project.takes : []) {
+    const t = cleanTake({ ...raw, id: newId('take') });
+    if (!t) continue;
+    t.recordingId = raw.recordingId && recMap.has(raw.recordingId) ? recMap.get(raw.recordingId) : null;
+    takes.push(t);
+  }
   const pair = doc.project.pair || {};
-  return { ok: true, vowels, recordings, pair: { a: idMap.get(pair.a) || null, b: idMap.get(pair.b) || null }, warnings };
+  return { ok: true, vowels, takes, recordings, pair: { a: idMap.get(pair.a) || null, b: idMap.get(pair.b) || null }, warnings };
 }
 
 export function clamp01(v) {

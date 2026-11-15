@@ -24,10 +24,12 @@ import { MorphAudio } from './morph-audio.js';
 import { HarmonicBars, TakeWave, COLOR_A, COLOR_B } from './morph-plots.js';
 import * as store from './morph-store.js';
 import { morphTourSteps } from './morph-tour.js';
+import { analyzeDrawnTake, estimateStartMs, positionAt, takeAnchors, undoLastTake, thinPath, MAX_DRAW_TAKE_SEC, WINDOW_SEC, HOP_SEC } from './take-model.js';
 
 const MAX_TAKE_SEC = 4;
 const EXPORT_SEC = 3;
 const DOT_COLORS = ['#ffb74d', '#4dd0c8', '#c792ea', '#f07178', '#c3e88d', '#82aaff', '#ffcb6b', '#89ddff', '#ff9cac', '#a5d6a7'];
+const TAKE_COLORS = ['#ff79c6', '#8be9fd', '#f1fa8c', '#50fa7b', '#bd93f9', '#ffb86c'];
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 function svg(tag, attrs = {}, ...children) {
@@ -65,7 +67,10 @@ export function mount(root) {
   const recs = new Map();
   let storageNote = loaded.ok ? '' : `Could not read saved data: ${loaded.error}`;
   let view = '1d';
-  let spaceMode = 'play'; // 'play' | 'edit'
+  let spaceMode = 'play'; // 'play' | 'edit' | 'draw'
+  let drawing = null; // the drawn take being recorded: { path, arrivals, pointerId, ... }
+  let drawStatus = ''; // message under the square in Draw mode
+  let replay = null; // { takeId, raf } while a take is replayed along its path
   let dotClick = 'synth'; // 'synth' | 'original'
   let stopOnRelease = false;
   let selectedId = null; // selected dot / vowel in the 2D view
@@ -81,7 +86,8 @@ export function mount(root) {
   const recorder = new VowelRecorder();
 
   const vowelById = (id) => project.vowels.find((v) => v.id === id) || null;
-  const colorOf = (v) => DOT_COLORS[Math.max(0, project.vowels.indexOf(v)) % DOT_COLORS.length];
+  const takeColor = (id) => TAKE_COLORS[Math.max(0, project.takes.findIndex((t) => t.id === id)) % TAKE_COLORS.length];
+  const colorOf = (v) => (v && v.takeId ? takeColor(v.takeId) : DOT_COLORS[Math.max(0, project.vowels.indexOf(v)) % DOT_COLORS.length]);
 
   let saveTimer = 0;
   function save(now = false) {
@@ -531,10 +537,12 @@ export function mount(root) {
   const gLines = svg('g', { class: 'vm-lines' });
   const gDots = svg('g', { class: 'vm-dots' });
   const cursor = svg('g', { class: 'vm-cursor' }, svg('circle', { r: 16 }), svg('line', { x1: -28, y1: 0, x2: 28, y2: 0 }), svg('line', { x1: 0, y1: -28, x2: 0, y2: 28 }));
-  square.append(gGrid, gLines, gDots, cursor);
+  const gTakes = svg('g', { class: 'vm-takes-layer' });
+  square.append(gGrid, gTakes, gLines, gDots, cursor);
   const squareHint = h('div', { class: 'vm-square-hint' });
   const playModeBtn = h('button', { class: 'btn seg', onclick: () => setSpaceMode('play') }, '🔊 Play / explore');
   const editModeBtn = h('button', { class: 'btn seg', onclick: () => setSpaceMode('edit') }, '✋ Edit / place dots');
+  const drawModeBtn = h('button', { class: 'btn seg vm-draw-btn', onclick: () => setSpaceMode('draw') }, '✏️ Draw + record a take');
   const powerSel = h('select', { 'aria-label': 'Distance influence', onchange: () => { project.space.power = Number(powerSel.value); updateSpace(); save(); } },
     POWERS.map((x) => h('option', { value: String(x.p), selected: project.space.power === x.p || null }, `${x.name} (power ${x.p})`)));
   const powerHelp = h('div', { class: 'help' });
@@ -557,7 +565,7 @@ export function mount(root) {
   const listEl = h('div', { class: 'vm-list' });
   const selectedEl = h('div', { class: 'vm-selected' });
   const spaceControls = h('section', { class: 'card vm-space-controls' },
-    h('div', { class: 'seg-group vm-modes', role: 'group', 'aria-label': 'Square mode' }, playModeBtn, editModeBtn),
+    h('div', { class: 'seg-group vm-modes', role: 'group', 'aria-label': 'Square mode' }, playModeBtn, editModeBtn, drawModeBtn),
     squareHint,
     h('div', { class: 'vm-play-only' },
       h('div', { class: 'row gap wrap' }, play2, stop2, h('label', { class: 'check' }, releaseChk, 'Stop when I let go')),
@@ -566,6 +574,7 @@ export function mount(root) {
     h('div', { class: 'field' }, h('label', {}, 'Distance influence '), powerSel, powerHelp),
     spacePos, spaceF0, spaceMsg, weightsEl, bars2Canvas,
     h('div', { class: 'row gap wrap' }, dl2));
+  const takesEl = h('section', { class: 'card vm-takes' });
   view2.append(h('div', { class: 'vm-space' },
     h('div', { class: 'vm-square-col' }, h('div', { class: 'vm-square-wrap' }, square), h('div', { class: 'vm-axes muted' }, 'Positions run from (0, 0) at the bottom left to (1, 1) at the top right. Axes have no fixed meaning: arrange the vowels however you like.')),
     spaceControls),
@@ -575,21 +584,224 @@ export function mount(root) {
     listEl,
     h('div', { class: 'vm-take-wrap', 'data-take': 'space' }, h('div', { class: 'vm-take-title' }, 'Record or import a new vowel:'),
       h('div', { class: 'vm-take-slot' }))),
+  takesEl,
   selectedEl);
 
   function setSpaceMode(m) {
+    if (drawing) return; // finish the take first
+    const was = spaceMode;
     spaceMode = m;
-    if (m === 'edit' && playing && playing.what === '2d') stopSound();
-    if (m === 'play') placingId = null;
+    stopReplay();
+    if ((m === 'edit' || m === 'draw') && playing && playing.what === '2d') stopSound();
+    if (m === 'play' || m === 'draw') placingId = null;
+    if (m === 'draw' && was !== 'draw') armDrawMic();
+    if (m !== 'draw' && was === 'draw' && !recordingFor) mic.stop();
     renderSpace();
+  }
+
+  // ───────────── drawn takes (part 2) ─────────────
+  // The microphone opens when Draw mode is chosen (that click is the user
+  // gesture browsers require), so pressing down in the square can start
+  // capturing at once.
+  async function armDrawMic() {
+    if (mic.listening) return true;
+    drawStatus = 'Opening the microphone…';
+    renderDrawStatus();
+    await mic.start();
+    if (!mic.listening) {
+      const err = mic.error;
+      drawStatus = err ? `${err.title}. ${err.message.replace(/Enable Microphone/g, 'Draw + record')}` : 'The microphone did not start.';
+      renderDrawStatus();
+      return false;
+    }
+    drawStatus = 'Microphone ready. Press down in the square, sing, and draw; let go to finish the take.';
+    renderDrawStatus();
+    return true;
+  }
+
+  function renderDrawStatus() {
+    if (spaceMode === 'draw') squareHint.textContent = drawStatus || 'Draw mode: press down in the square and draw while you sing. Let go to finish.';
+  }
+
+  async function startDrawing(e, p) {
+    stopSound();
+    stopReplay();
+    const d = { pointerId: e.pointerId, path: [{ x: p.x, y: p.y, t: e.timeStamp }], arrivals: [], liveLine: null, done: false };
+    drawing = d;
+    square.setPointerCapture(e.pointerId);
+    d.liveLine = svg('polyline', { class: 'vm-live-path', points: '' });
+    gTakes.append(d.liveLine);
+    updateLivePath();
+    if (!mic.listening && !(await armDrawMic())) { drawing = null; d.liveLine.remove(); return; }
+    if (d.done) { drawing = null; d.liveLine.remove(); drawStatus = 'That was too quick: the microphone was still opening. Press down and draw again.'; renderDrawStatus(); return; }
+    drawStatus = 'Recording… keep singing and drawing. Let go to finish.';
+    renderDrawStatus();
+    const sr = mic.sampleRate;
+    d.recording = recorder.start(mic, MAX_DRAW_TAKE_SEC, {
+      onProgress: (sec) => {
+        d.arrivals.push({ ms: performance.now(), count: Math.round(sec * sr) });
+        if (!d.done) { drawStatus = `Recording… ${sec.toFixed(1)} s (up to ${MAX_DRAW_TAKE_SEC} s). Let go to finish.`; renderDrawStatus(); }
+      },
+    });
+    const result = await d.recording;
+    if (!d.done) finishDrawing(null); // hit the time limit while still drawing
+    await finishTake(d, result);
+  }
+
+  function addPathPoints(e) {
+    if (!drawing || e.pointerId !== drawing.pointerId) return;
+    const list = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [];
+    for (const ev of list.length ? list : [e]) {
+      const q = pointFromEvent(ev);
+      drawing.path.push({ x: q.x, y: q.y, t: ev.timeStamp });
+    }
+    updateLivePath();
+  }
+
+  function updateLivePath() {
+    if (!drawing || !drawing.liveLine) return;
+    drawing.liveLine.setAttribute('points', drawing.path.map((q) => { const s = toSvg(q); return `${s.x.toFixed(1)},${s.y.toFixed(1)}`; }).join(' '));
+  }
+
+  function finishDrawing(e) {
+    const d = drawing;
+    if (!d || d.done) return;
+    if (e) addPathPoints(e);
+    d.done = true;
+    if (d.recording) recorder.stop();
+  }
+
+  async function finishTake(d, result) {
+    drawing = null;
+    if (d.liveLine) d.liveLine.remove();
+    if (spaceMode !== 'draw') mic.stop();
+    const sec = result.samples.length / result.sampleRate;
+    if (result.error) { drawStatus = `Recording failed: ${result.error}`; renderSpace(); return; }
+    if (sec < WINDOW_SEC) { drawStatus = `That take was only ${sec.toFixed(2)} s of audio, too short for one ${WINDOW_SEC} s snippet, so nothing was kept. Press down, sing and draw a little longer.`; renderSpace(); return; }
+    drawStatus = `Analyzing ${sec.toFixed(1)} s of audio in ${WINDOW_SEC} s snippets…`;
+    renderDrawStatus();
+    await new Promise((r) => setTimeout(r, 30)); // let the message paint
+    const startMs = estimateStartMs(d.arrivals, result.sampleRate);
+    const a = analyzeDrawnTake({ samples: result.samples, sampleRate: result.sampleRate, startMs, path: d.path });
+    const t0 = d.path[0].t;
+    const rec = { id: newId('rec'), name: 'drawn take', sampleRate: result.sampleRate, samples: result.samples, createdAt: new Date().toISOString(), source: 'microphone-drawn' };
+    recs.set(rec.id, rec);
+    const put = await store.putRecording(rec);
+    const take = {
+      id: newId('take'), name: `Take ${project.takes.length + 1}`, recordingId: rec.id, createdAt: new Date().toISOString(),
+      durationSec: Math.round(sec * 100) / 100,
+      path: thinPath(d.path.map((q) => ({ x: q.x, y: q.y, t: q.t - t0 }))),
+      audioOffsetMs: Math.round((startMs - t0) * 10) / 10,
+      points: a.points, stats: a.stats, hidden: false,
+    };
+    project.takes.push(take);
+    save(true);
+    const st = a.stats;
+    drawStatus = `${take.name}: ${st.usable} usable point${st.usable === 1 ? '' : 's'} from ${st.snippets} snippet${st.snippets === 1 ? '' : 's'}`
+      + ` (skipped ${st.silent} silent, ${st.unreliable} without a reliable pitch${st.outsidePath ? `, ${st.outsidePath} before/after the drawing` : ''}).`
+      + (st.usable ? ' Switch to Play to trace it, or draw another take.' : ' Nothing usable: sing a steady, voiced sound while drawing, or undo this take.')
+      + (put.ok ? '' : ` The recording could not be stored in this browser (${put.error}).`);
+    renderAll();
+  }
+
+  function undoTake() {
+    const { takes, removed } = undoLastTake(project.takes);
+    if (!removed) return;
+    stopReplay();
+    project.takes = takes;
+    dropTakeRecording(removed);
+    drawStatus = `Undid ${removed.name} (${removed.points.length} point${removed.points.length === 1 ? '' : 's'}). Your placed vowels are unchanged.`;
+    save(true);
+    soundChanged();
+    renderAll();
+  }
+
+  function deleteTake(take) {
+    if (!window.confirm(`Delete ${take.name} and its ${take.points.length} learned points? Placed vowels are not affected.`)) return;
+    stopReplay();
+    project.takes = project.takes.filter((t) => t !== take);
+    dropTakeRecording(take);
+    save(true);
+    soundChanged();
+    renderAll();
+  }
+
+  function dropTakeRecording(take) {
+    if (take.recordingId && !project.vowels.some((v) => v.recordingId === take.recordingId)) {
+      recs.delete(take.recordingId);
+      store.deleteRecording(take.recordingId);
+    }
+  }
+
+  /** Moves the marker along a take's path at the speed it was drawn, playing the blend. */
+  function replayTake(take) {
+    stopReplay();
+    if (spaceMode !== 'play') { spaceMode = 'play'; if (!recordingFor) mic.stop(); renderSpace(); }
+    if (take.path.length < 2) return;
+    const total = take.path[take.path.length - 1].t;
+    const startAt = performance.now();
+    project.space.point = { x: take.path[0].x, y: take.path[0].y };
+    if (!startSpaceSound()) return;
+    const r = { takeId: take.id, raf: 0 };
+    replay = r;
+    const step = () => {
+      if (replay !== r) return;
+      const t = performance.now() - startAt;
+      const q = positionAt(take.path, Math.min(t, total));
+      if (q) { project.space.point = q; updateSpace(); }
+      if (t >= total) { replay = null; stopSound(); renderTakes(); return; }
+      r.raf = requestAnimationFrame(step);
+    };
+    r.raf = requestAnimationFrame(step);
+    renderTakes();
+  }
+
+  function stopReplay() {
+    if (!replay) return;
+    cancelAnimationFrame(replay.raf);
+    replay = null;
+    renderTakes();
+  }
+
+  function playTakeOriginal(take) {
+    const rec = recs.get(take.recordingId);
+    if (!rec) return;
+    stopReplay();
+    playing = null;
+    audio.playOriginal(rec, { label: `ORIGINAL recording of ${take.name}` });
+  }
+
+  function renderTakes() {
+    const latest = project.takes.length ? undoLastTake(project.takes).removed : null;
+    takesEl.replaceChildren(
+      h('h2', {}, 'Drawn takes'),
+      h('p', { class: 'help' }, `In ✏️ Draw mode, press down in the square to start recording, draw a line or curve while you change the vowel, and let go to finish. The take is cut into ${WINDOW_SEC} s snippets every ${HOP_SEC} s; each snippet’s pitch and harmonics are measured with the same analysis as a single vowel and placed where the pointer was at that moment (matched by timestamp). Silent or unpitched snippets are skipped.`),
+      h('div', { class: 'row gap wrap' },
+        h('button', { class: 'btn vm-undo-take', disabled: !latest || !!drawing, onclick: () => undoTake() }, latest ? `↶ Undo last take (${latest.name})` : '↶ Undo last take'),
+        h('span', { class: 'muted' }, 'Undo removes only the most recent take. Placed vowels stay.')),
+      project.takes.length
+        ? h('div', { class: 'vm-take-list' }, project.takes.map((t) => h('div', { class: 'vm-row vm-take-row', 'data-take-id': t.id },
+          h('span', { class: 'vm-swatch', style: { background: takeColor(t.id) } }),
+          h('b', {}, t.name),
+          h('span', { class: 'muted vm-row-info' }, `${t.stats.usable} usable point${t.stats.usable === 1 ? '' : 's'} of ${t.stats.snippets} snippets · skipped ${t.stats.silent} silent, ${t.stats.unreliable} unreliable · ${t.durationSec.toFixed(1)} s`),
+          h('button', { class: 'btn small vm-replay', disabled: t.path.length < 2 || !t.points.length, onclick: () => (replay && replay.takeId === t.id ? (stopReplay(), stopSound()) : replayTake(t)) }, replay && replay.takeId === t.id ? '■ Stop replay' : '▶ Replay along path'),
+          h('button', { class: 'btn small vm-orig-btn', disabled: !recs.get(t.recordingId), onclick: () => playTakeOriginal(t) }, '▶ Original'),
+          h('button', { class: 'btn small', onclick: () => { t.hidden = !t.hidden; save(); soundChanged(); renderAll(); } }, t.hidden ? 'Show (use again)' : 'Hide (ignore)'),
+          h('button', { class: 'btn small danger', onclick: () => deleteTake(t) }, '🗑'))))
+        : h('p', { class: 'help' }, 'No drawn takes yet.'));
   }
 
   function placedVowels() {
     return project.vowels.filter((v) => v.pos);
   }
 
+  /** Everything that sounds in the square: placed vowels plus learned take points. */
+  function anchors() {
+    return [...project.vowels, ...takeAnchors(project.takes)];
+  }
+
   function currentBlend() {
-    return blendAt(project.vowels, project.space.point, project.space.power);
+    return blendAt(anchors(), project.space.point, project.space.power);
   }
 
   function spaceLabel() {
@@ -610,16 +822,27 @@ export function mount(root) {
   function renderSpace() {
     playModeBtn.setAttribute('aria-pressed', spaceMode === 'play' ? 'true' : 'false');
     editModeBtn.setAttribute('aria-pressed', spaceMode === 'edit' ? 'true' : 'false');
+    drawModeBtn.setAttribute('aria-pressed', spaceMode === 'draw' ? 'true' : 'false');
     square.dataset.mode = spaceMode;
     spaceControls.dataset.mode = spaceMode;
     const placing = vowelById(placingId);
-    squareHint.textContent = spaceMode === 'play'
+    squareHint.textContent = spaceMode === 'draw' ? (drawStatus || 'Draw mode: press down in the square and draw while you sing. Let go to finish.')
+      : spaceMode === 'play'
       ? 'Play mode: click or drag inside the square to hear the blend there. Dots do not move in this mode.'
       : placing ? `Edit mode: click in the square where “${placing.name}” should go.` : 'Edit mode: drag a dot to move it, tap a dot to select it, or choose “Place” in the list below. No sound plays while you edit.';
     powerHelp.textContent = (POWERS.find((x) => x.p === project.space.power) || POWERS[1]).describe;
     dotClickSel.replaceChildren(...[['synth', 'its SYNTHESIZED sound (the marker jumps onto the dot: exact analyzed values)'], ['original', 'its ORIGINAL recording (a one-off preview; drag again to go back to blending)']].map(([id, text]) =>
       h('label', { class: 'check' }, h('input', { type: 'radio', name: 'vm-dotclick', value: id, checked: dotClick === id, onchange: () => { dotClick = id; } }), text)));
 
+    // drawn takes: path + learned points
+    gTakes.replaceChildren();
+    for (const t of project.takes) {
+      const col = takeColor(t.id);
+      const g = svg('g', { class: `vm-take-g${t.hidden ? ' hidden-take' : ''}`, 'data-take-id': t.id });
+      if (t.path.length > 1) g.append(svg('polyline', { class: 'vm-take-path', stroke: col, points: t.path.map((q) => { const s = toSvg(q); return `${s.x.toFixed(1)},${s.y.toFixed(1)}`; }).join(' ') }));
+      for (const q of t.points) { const s = toSvg(q); g.append(svg('circle', { class: 'vm-take-pt', cx: s.x.toFixed(1), cy: s.y.toFixed(1), r: 9, fill: col })); }
+      gTakes.append(g);
+    }
     // dots
     gDots.replaceChildren();
     for (const v of placedVowels()) {
@@ -668,6 +891,7 @@ export function mount(root) {
         h('h2', {}, h('span', { class: 'vm-swatch', style: { background: colorOf(sel) } }), ` Selected: ${sel.name}`),
         vowelPanel(sel, { extra: null }), posRow));
     }
+    renderTakes();
     updateSpace();
   }
 
@@ -676,19 +900,19 @@ export function mount(root) {
     const c = toSvg(pt);
     cursor.setAttribute('transform', `translate(${c.x} ${c.y})`);
     const b = currentBlend();
-    const placed = placedVowels();
+    const placed = [...placedVowels(), ...takeAnchors(project.takes)];
     spacePos.textContent = `Marker at x ${pt.x.toFixed(3)}, y ${pt.y.toFixed(3)}`;
     play2.disabled = !b.params;
     dl2.disabled = !b.params;
     const warnings = [];
     if (b.message) warnings.push(b.message);
-    const exact = b.status === 'blend' && b.contributions.find((x) => x.weight === 1);
+    const exact = b.status === 'blend' && b.contributions.find((x) => x.weight === 1 && !x.vowel.takeId);
     if (exact) warnings.push(`The marker is exactly on ${exact.vowel.name}: you hear its analyzed values exactly (100 %).`);
     const unusable = placed.filter((v) => !isUsable(v));
     if (unusable.length) warnings.push(`Not used (no usable analysis): ${unusable.map((v) => v.name).join(', ')}.`);
     const usablePlaced = b.contributions.map((x) => x.vowel);
     const close = closePairs(usablePlaced.map((v) => v.pos));
-    if (close.length) warnings.push(`Nearly on top of each other: ${close.map(([i, j]) => `${usablePlaced[i].name} and ${usablePlaced[j].name}`).join('; ')}. The blend changes very quickly between them; dots on exactly the same spot share that spot equally.`);
+    if (close.length && close.length <= 6) warnings.push(`Nearly on top of each other: ${close.map(([i, j]) => `${usablePlaced[i].name} and ${usablePlaced[j].name}`).join('; ')}. The blend changes very quickly between them; dots on exactly the same spot share that spot equally.`);
     spaceMsg.textContent = warnings.join(' ');
     gLines.replaceChildren();
     if (!b.params) {
@@ -699,16 +923,21 @@ export function mount(root) {
       return;
     }
     for (const { vowel, weight } of b.contributions) {
+      if (vowel.takeId && weight < 0.02) continue; // keep the square readable with many learned points
       const p = toSvg(vowel.pos);
       gLines.append(svg('line', { x1: c.x, y1: c.y, x2: p.x, y2: p.y, stroke: colorOf(vowel), 'stroke-width': 2 + 14 * weight, 'stroke-opacity': 0.15 + 0.75 * weight }));
     }
     spaceF0.replaceChildren(h('span', { class: 'muted' }, 'Fundamental now '), h('b', {}, hz(b.params.f0)), ` ${noteName(b.params.f0)}`);
-    const sorted = [...b.contributions].sort((x, y) => y.weight - x.weight);
-    weightsEl.replaceChildren(h('div', { class: 'vm-sub' }, 'How much each vowel contributes here (sums to 100 %):'),
+    const sortedAll = [...b.contributions].sort((x, y) => y.weight - x.weight);
+    const SHOW = 8;
+    const sorted = sortedAll.slice(0, SHOW);
+    const rest = sortedAll.slice(SHOW);
+    weightsEl.replaceChildren(h('div', { class: 'vm-sub' }, 'How much each vowel or learned point contributes here (sums to 100 %):'),
       ...sorted.map(({ vowel, weight }) => h('div', { class: 'vm-wrow' },
         h('span', { class: 'vm-wname' }, h('span', { class: 'vm-swatch', style: { background: colorOf(vowel) } }), vowel.name),
         h('span', { class: 'vm-wbar' }, h('span', { style: { width: `${weight * 100}%`, background: colorOf(vowel) } })),
-        h('span', { class: 'vm-wval' }, pct(weight)))));
+        h('span', { class: 'vm-wval' }, pct(weight)))),
+      ...(rest.length ? [h('div', { class: 'muted vm-wrest' }, `…and ${rest.length} more point${rest.length === 1 ? '' : 's'} sharing ${pct(rest.reduce((s, x) => s + x.weight, 0))}.`)] : []));
     bars2.set({ amps: b.params.amps });
     if (playing && playing.what === '2d') audio.update(b.params, spaceLabel());
   }
@@ -733,6 +962,11 @@ export function mount(root) {
     if (e.button > 0) return;
     e.preventDefault();
     const p = pointFromEvent(e);
+    if (spaceMode === 'draw') {
+      if (!drawing) startDrawing(e, p);
+      return;
+    }
+    stopReplay();
     const hit = hitDot(p);
     if (spaceMode === 'edit') {
       if (placingId) {
@@ -764,6 +998,7 @@ export function mount(root) {
     updateSpace();
   });
   square.addEventListener('pointermove', (e) => {
+    if (drawing && e.pointerId === drawing.pointerId && !drawing.done) { addPathPoints(e); return; }
     if (!drag || e.pointerId !== drag.pointerId) return;
     const p = pointFromEvent(e);
     if (drag.kind === 'move-dot') {
@@ -780,6 +1015,7 @@ export function mount(root) {
     }
   });
   const endDrag = (e) => {
+    if (drawing && e.pointerId === drawing.pointerId) { finishDrawing(e); return; }
     if (!drag || e.pointerId !== drag.pointerId) return;
     const d = drag;
     drag = null;
@@ -819,6 +1055,7 @@ export function mount(root) {
       if (!put.ok) r.warnings.push(`Recording ${rec.name} could not be stored in this browser (${put.error}); it works until you reload.`);
     }
     project.vowels.push(...r.vowels);
+    project.takes.push(...(r.takes || []));
     if ((r.pair.a || r.pair.b) && window.confirm(`Also use the backup’s slider pair (A: ${vowelById(r.pair.a)?.name || '—'}, B: ${vowelById(r.pair.b)?.name || '—'}) instead of your current one?`)) {
       project.pair = { a: r.pair.a || project.pair.a, b: r.pair.b || project.pair.b };
     }
@@ -872,6 +1109,8 @@ export function mount(root) {
       recordings: [...recs.values()].map((r) => ({ id: r.id, sampleRate: r.sampleRate, length: r.samples.length })),
       slider: currentSliderParams(), blend: (() => { const b = currentBlend(); return { status: b.status, params: b.params, weights: b.contributions.map((c) => ({ id: c.vowel.id, name: c.vowel.name, weight: c.weight })) }; })(),
       audio: audio.debug(), targetRms: TARGET_RMS, harmonics: HARMONICS,
+      drawing: drawing ? { points: drawing.path.length, arrivals: drawing.arrivals.length, done: drawing.done } : null,
+      drawStatus, replay: replay ? replay.takeId : null, micListening: mic.listening,
     }),
   };
 
@@ -880,6 +1119,7 @@ export function mount(root) {
       window.removeEventListener('pagehide', flush);
       save(true);
       tour.close();
+      stopReplay();
       recorder.cancel();
       mic.stop();
       audio.close();

@@ -109,3 +109,14 @@
   .vm-top-actions { align-items: flex-start; }
   .vm-storage { text-align: left; }
 }
+
+/* Drawn takes (part 2) */
+.vm-square[data-mode="draw"] { cursor: crosshair; border-color: #9b2f6f; }
+.vm-square[data-mode="draw"] .vm-cursor { opacity: 0.2; }
+.vm-space-controls[data-mode="draw"] .vm-play-only { display: none; }
+.vm-take-path { fill: none; stroke-width: 5; stroke-opacity: 0.55; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+.vm-take-pt { stroke: #0b0f14; stroke-width: 2.5; pointer-events: none; }
+.vm-take-g.hidden-take { opacity: 0.18; }
+.vm-live-path { fill: none; stroke: #ff5c8a; stroke-width: 6; stroke-dasharray: 14 8; stroke-linecap: round; pointer-events: none; }
+.vm-takes .vm-take-row { flex-wrap: wrap; }
+.vm-wrest { font-size: 0.85em; margin-top: 4px; }

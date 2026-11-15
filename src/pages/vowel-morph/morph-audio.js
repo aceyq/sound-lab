@@ -53,10 +53,20 @@ export class MorphAudio {
       morphAudioCounters.contexts++;
       this.volume = this.ctx.createGain();
       this.volume.gain.value = this.volumeValue;
-      this.volume.connect(this.ctx.destination);
+      // gate: 1 normally; the Tilt Sound Map fades it to 0 when phone tracking drops.
+      this.gate = this.ctx.createGain();
+      this.gate.gain.value = 1;
+      this.volume.connect(this.gate).connect(this.ctx.destination);
     }
     if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
     return this.ctx;
+  }
+
+  /** Fades everything (synth, originals, anything else on `volume`) toward `level` with time constant `tau` s. */
+  setGate(level, tau = 0.08) {
+    if (!this.gate) return;
+    this.gate.gain.setTargetAtTime(level, this.ctx.currentTime, tau);
+    this.gateLevel = level;
   }
 
   setVolume(v) {
