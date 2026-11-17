@@ -2946,6 +2946,40 @@ Part 1: confirm that my existing 2D vowel map blends f0 in Hz and each harmonic 
 - Part 3: Claude replaced the phone page with a "4. Pose Sound Map" page. It runs MediaPipe pose tracking in the browser, with the model hosted on the site. Right elbow bend moves the dot left/right and left arm lift moves it up/down. It has two-pose calibration with a countdown, names lost joints and fades the sound, and offers starter vowels laid out for the phrase. You can attach Vowel Morph vowels to held poses or record new ones there, turn on an optional clap that fires once on entering the final pose, and use a 13-step tour with Back, Next and Done. Motion Score and Vowel Morph are unchanged, and the old phone page link now opens the camera page.
 - Checks Claude ran, all with simulated input: 174 unit tests and the build pass. The drawn-take browser script passed 20/20. The pose browser script passed 38/38, using generated body landmarks fed through the page's pose handler: each angle moved only its own axis, the two angles together set the blend, a held pose sustained the sound, a lost joint faded it, the ah → ee → oo → back phrase matched each starter, the clap fired once per entry, and the tour worked. The same script started the real pose model on Chromium's fake camera (no person). The Motion Score checks passed 67/67.
 
+### Part 3 follow-up: elbow = vowel, head = pitch
+
+Prompt (verbatim, sent November 17, 2026 UTC). ChatGPT helped me draft it:
+
+<details>
+<summary>Full prompt</summary>
+
+```text
+I played around with the camera sound map, and I want to make it easier to understand what I’m controlling and more fun to actually perform with. Please update the camera version of Part 3 in my `aceyq/sound-lab` repo.
+
+**Use my elbow to change the vowel and my head to change the pitch.** Keep right elbow bend as one axis, and replace left arm lift with side-to-side head tilt for the other. I want to bend my right elbow to move between “ah,” “ee,” and “oo,” then tilt my head toward one shoulder to lower the pitch and toward the other to raise it. Use the angle of my head relative to my shoulders so shifting my whole body sideways doesn’t act like a head tilt. Show me both angles, highlight the landmarks you’re using on the camera preview, and give me a quick way to calibrate a comfortable range with my head upright as neutral. Keep the two angles as the coordinates of the map so I can move through both dimensions at once.
+
+**Make the starter map playable right away.** I’m picturing “ah,” “ee,” and “oo” in columns, with lower, middle, and higher versions of each vowel. Keep the pitch matched across vowels in each row and use the same harmonic balance for each vowel up and down its column. Reuse the vowel synthesis I already have. I want the controls to feel predictable between the dots too. If I keep my head still and bend my elbow, I should mainly hear the vowel change. If I hold my elbow still and tilt my head, I should mainly hear the pitch change. Please check those two movements separately.
+
+**Show me what I’m hearing.** Bring over the colored contribution bars from Vowel Morph so I can see how much “ah,” “ee,” and “oo” contribute to the sound at my current pose. Group the contributions by vowel so I don’t have to read a separate bar for every pitch version. Show the current fundamental frequency in Hz and a live graph of the harmonic strengths the synth is actually using. I want to be able to point to the screen in class and say, “Here my pitch is staying about the same, but you can see the harmonic bars and vowel percentages changing as I bend my elbow.” Then I want to hold my elbow and tilt my head to show the pitch moving.
+
+**Make adding my own voice optional and give it a reason to be there.** The starter vowels already let me play, so put recording under something like **Customize sounds**. Let me replace one of the starter vowels with my own recording or add another pitched sound, like a closed-mouth “mmm.” Give me a way to hear the original and synthesized versions before I use it on the map. Make it easy to get back to the starter sounds while I’m experimenting.
+
+For the dance part, I want to try a short phrase where I slowly bend my elbow to glide from “ah” toward “ee,” then hit a head tilt on the next count to take that sound higher. I can freeze there for a count and then reverse it. The sound should follow where I’m holding the pose so I can change the timing while I perform. Update the existing **Back / Next** tour to walk me through that exact demo, including camera setup, calibration, trying each movement on its own, reading the bars, and then putting the movements together.
+
+Please test the two controls separately and together, and check that the percentages and harmonic graph match what the app is synthesizing. Tell me what you checked in code and what I should try with my actual camera before class. Add this prompt verbatim as a follow-up in the camera project’s `AI_USE.md` entry, credit ChatGPT for helping draft it, and briefly describe what changed and what you tested. Then commit and push, check the deployment, and send me the commit and live app links.
+```
+
+</details>
+
+What changed: I replaced left arm lift with head tilt, measured as the angle between my ear line and my shoulder line, so shifting my whole body doesn't count. The elbow picks the vowel and the head picks the pitch. Claude made the starter map a grid of "ah", "ee" and "oo" columns with low, middle and high rows. Each row has one matched pitch and each column one harmonic recipe. Between the dots it blends with linear weights along each direction separately, so the elbow only changes the vowel and the head only changes the pitch. The page now shows grouped vowel-mix bars, the fundamental in Hz and a live graph of the harmonics the synth uses. It has a guided five-pose calibration with beeps, and recording moved under an optional "Customize sounds" section (preview original and synthesized, replace or add a column, back to starters). The tour now follows my demo phrase.
+
+What Claude tested, all with simulated input: 175 unit tests and the build pass. The pose browser script passed 42/42 with generated body landmarks:
+- Bending the elbow alone kept the pitch at 220 Hz while the vowel moved ah → ee → oo.
+- Tilting the head alone moved the pitch 165 → 220 → 294 Hz while the vowel mix and harmonics stayed the same, and sliding or leaning the whole body didn't count as a tilt.
+- The demo phrase followed the pose both ways.
+- The displayed Hz, vowel percentages and harmonic graph matched what the synth was playing.
+- The real pose model ran on Chromium's fake camera, and Vowel Morph, Motion Score and Frequency Playground still open.
+
 ### My own testing
 
-To confirm: recording and drawing with my own voice and microphone, listening to the blends, and trying the pose map with my own body in front of my laptop camera.
+To confirm: recording and drawing with my own voice and microphone, listening to the blends, and trying the pose map (elbow for the vowel, head tilt for the pitch) with my own body in front of my laptop camera.
