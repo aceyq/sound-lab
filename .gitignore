@@ -3,3 +3,4 @@ dist/
 verification/
 *.local
 .DS_Store
+public/mediapipe/

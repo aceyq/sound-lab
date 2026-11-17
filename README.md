@@ -16,11 +16,11 @@ Every row of the table is one term with its own frequency fᵢ and amplitude A�
 
 This project was built with substantial help from Claude (Anthropic), used as Claude Code. I, Acelynn (Ace) Qiao, wrote the requirements for each feature from Professor Minces's assignments, made the scope and design decisions in those prompts, tested features on my own hardware and by listening where recorded, made the demo videos, and presented the work. Claude wrote the application code, tests, verification scripts and most of the documentation, ran the automated checks, and committed and published most updates. Every commit shows my Git identity, including commits Claude made on my Mac. [AI_USE.md](AI_USE.md) has, for each app and major feature, the main prompts I sent (verbatim), what Claude implemented, and how the code was tested.
 
-## Vowel Morph and Tilt Sound Map (capstone)
+## Vowel Morph and Pose Sound Map (capstone)
 
 **3. Vowel Morph** (`#/vowel-morph`) records sustained vowels, analyzes each into a fundamental and 48 harmonic strengths, and blends those numbers along a slider (1D) or anywhere in a square (2D, inverse-distance weights) to synthesize one new sound. In the square, **✏️ Draw + record a take** records while you draw a curve and turns 0.2 s snippets into learned points along it, matched to the pointer by timestamp. See [VOWEL_MORPH_UPDATE.md](VOWEL_MORPH_UPDATE.md) and [CAPSTONE_MAP_UPDATE.md](CAPSTONE_MAP_UPDATE.md).
 
-**4. Tilt Sound Map** (`#/tilt-map`) plays the same kind of sound map with a phone: forward/back tilt moves the dot up and down, sideways tilt left and right, using Motion Score's phone pairing. It has neutral and range calibration, starter sounds, recording at a pose, a fade when tracking drops, and an optional kick/snare/clap layer with hysteresis. See [CAPSTONE_MAP_UPDATE.md](CAPSTONE_MAP_UPDATE.md).
+**4. Pose Sound Map** (`#/pose-map`) plays the same kind of vowel map with your body. The laptop camera (MediaPipe Pose, running in the browser and served from this site) measures two joint angles: right elbow bend moves the dot left/right and left arm lift moves it down/up. It has two-pose calibration, a lost-joint fade, starter vowels for an ah → ee → oo phrase, attaching Vowel Morph vowels or new recordings to held poses, an optional clap on the final pose, and a guided tour. It replaced an earlier phone-tilt version. See [CAPSTONE_MAP_UPDATE.md](CAPSTONE_MAP_UPDATE.md).
 
 ## Run it locally
 

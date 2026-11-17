@@ -11,9 +11,10 @@ const PAD = 8;
 const GAP = 14;
 
 export class Tour {
-  constructor(steps, { label = 'Guide' } = {}) {
+  constructor(steps, { label = 'Guide', finishLabel = 'Finish' } = {}) {
     this.steps = steps;
     this.label = label;
+    this.finishLabel = finishLabel;
     this.i = -1;
     this.hole = h('div', { class: 'tour-hole', 'aria-hidden': 'true' });
     this.shade = h('div', { class: 'tour-shade', 'aria-hidden': 'true' });
@@ -66,7 +67,7 @@ export class Tour {
     this.tryIt.textContent = s.tryIt ? `Try it: ${s.tryIt}` : '';
     this.tryIt.hidden = !s.tryIt;
     this.back.disabled = this.i === 0;
-    this.next.textContent = this.i === this.steps.length - 1 ? 'Finish' : 'Next →';
+    this.next.textContent = this.i === this.steps.length - 1 ? this.finishLabel : 'Next →';
     const t = this._target();
     if (t && t.el) t.el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     this.place();

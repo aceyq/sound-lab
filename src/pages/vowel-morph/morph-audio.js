@@ -53,7 +53,7 @@ export class MorphAudio {
       morphAudioCounters.contexts++;
       this.volume = this.ctx.createGain();
       this.volume.gain.value = this.volumeValue;
-      // gate: 1 normally; the Tilt Sound Map fades it to 0 when phone tracking drops.
+      // gate: 1 normally; the Pose Sound Map fades it to 0 when camera tracking drops.
       this.gate = this.ctx.createGain();
       this.gate.gain.value = 1;
       this.volume.connect(this.gate).connect(this.ctx.destination);

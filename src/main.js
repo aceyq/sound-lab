@@ -2,7 +2,7 @@ import './style.css';
 import * as frequencyPage from './pages/frequency/index.js';
 import * as motionScorePage from './pages/motion-score/index.js';
 import * as vowelMorphPage from './pages/vowel-morph/index.js';
-import * as tiltMapPage from './pages/tilt-map/index.js';
+import * as poseMapPage from './pages/pose-map/index.js';
 import * as controllerPage from './pages/motion-score/controller.js';
 
 // Hash routing (#/frequency) works on GitHub Pages sub-paths without any
@@ -11,12 +11,12 @@ const routes = {
   '/frequency': frequencyPage,
   '/motion-score': motionScorePage,
   '/vowel-morph': vowelMorphPage,
-  '/tilt-map': tiltMapPage,
+  '/pose-map': poseMapPage,
   // Phone companion page, reached through the pairing link / QR code.
   '/controller': controllerPage,
 };
 // Old link from the previous Project 2.
-const aliases = { '/air-canvas': '/motion-score' };
+const aliases = { '/air-canvas': '/motion-score', '/tilt-map': '/pose-map' };
 
 const outlet = document.getElementById('app');
 let current = null;

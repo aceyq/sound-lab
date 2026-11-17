@@ -2870,11 +2870,11 @@ Claude found that the blending used semitones and decibels rather than the linea
 
 Claude's checks passed: 157 unit tests, the build, and the browser checks for Vowel Morph (54), noise (22) and the existing apps. Listening tests with my own recordings were not part of these checks.
 
-## Capstone: 2D vowel map, drawn takes and Tilt Sound Map (November 14–15, 2026)
+## Capstone: 2D vowel map, drawn takes and Pose Sound Map (November 14–17, 2026)
 
-### Main build prompt
+### Prompt for Parts 1 and 2
 
-Prompt (verbatim, sent November 15, 2026 UTC). ChatGPT helped me draft it:
+Prompt (verbatim, sent November 15, 2026 UTC). ChatGPT helped me draft it. Its original Part 3 section is replaced by the revised prompt below; the bracketed line marks where it was.
 
 <details>
 <summary>Full prompt</summary>
@@ -2889,16 +2889,7 @@ Give me a short explanation of the weighting rule the code actually uses, includ
 I want to select a mode where I can press down in the square, draw a line or a curve with my mouse, and change the vowel I’m making while I draw. For example, I could draw a sine-wave shape while going from “ah” to “ee” to “oo.” Pressing down should start capturing audio and releasing should finish the take.
 The important part is that the app should take short snippets throughout the recording and use the mouse position at the time of each snippet. Please timestamp the audio and pointer positions so the sound from halfway through my take ends up halfway through my drawing in time, even if I changed drawing speed. Estimate the fundamental and harmonic amplitudes for each usable snippet and add those as points on the curve. Reuse the pitch and harmonic analysis that already works for individual vowels. Choose a window length that gives the pitch estimator enough audio to work with. Skip silent or unreliable snippets and show me how many usable points the take produced.
 Show the drawn path and the points the app actually learned. I should be able to trace the curve again to hear the changing sound, and click near or between learned points to hear the existing interpolation. Make it easy to undo a whole take if I mess up, without losing the individual vowels I already placed. Test this with a curved take where the sound changes along the path so we can tell the points actually represent different snippets.
-3. Build a separate phone-controlled sound map I can dance with
-For part 3, I want to take the 2D sound map I already made and control it with my phone. In the original map, I click an x,y position to hear a sound. In this new project, I want two angles from my phone’s motion sensors to replace the mouse coordinates:
-
-* Forward/back tilt (pitch angle) controls one axis.
-* Sideways tilt (roll angle) controls the other axis.
-
-Both angles should work together to pick one location on the sound map. Please make this a separate project or page in Sound Lab and reuse the phone pairing from my earlier instrument if it fits. Give me a quick way to calibrate my neutral position and a comfortable range for both angles. Show both angle readings and a dot that moves around the map as I tilt the phone.
-I want to be able to record a steady vowel, hold the phone at a pose, and attach that recording to the current pair of angles. Then I can add a few more sounds at different poses and hear what happens when I move between them. Reuse the interpolation from my 2D vowel map so nearby points contribute based on distance. Blend the fundamental frequencies and the corresponding harmonic amplitudes to synthesize one sound at my current position. Give me a few starter sounds so I can try it right away, plus a way to add one of my own during the class demo.
-For the fun part, I’d like an optional percussion layer that uses those same two angles. Put a kick, clap, and snare in different regions of the map. When I tilt into a region, play that drum once. I should be able to leave the region and come back to play it again. Add a small buffer at the boundaries so a shaky wrist doesn’t cause repeated hits, and show which drum just played. I want to see if I can do a short dance phrase where a slow wrist roll changes the sustained sound and a sharper tilt into one of the regions adds a beat. Get the two-angle sound map working first, then add a toggle so I can layer the percussion over it.
-I’ll demonstrate this part live in class. My plan is to move along each angle by itself so people can see how it moves the dot, then use both angles to move between sounds. After that, I’ll turn on percussion and try a short eight-count. Please test that each angle moves the dot independently, that the sound blend uses both angles, and that holding the phone still in a drum region plays only one hit. Let me know what you verified with simulated inputs and give me a short checklist for what I should try on my actual phone before class.
+[Part 3 section of this prompt (a phone-controlled sound map) removed here; it was replaced by the revised Part 3 prompt below.]
 
 Test it, update AI_USE, and publish
 Please run the existing tests and build, and check all three workflows as far as you can. For part 2, specifically check timestamp alignment when the mouse speed changes and confirm that undo removes only the latest take. For part 3, check that changing either angle affects the mapping and that audio fades when tracking drops. Tell me which checks used simulated inputs and which things I still need to try with my own microphone and camera.
@@ -2908,17 +2899,53 @@ Commit and push the assignment changes and the `AI_USE.md` update to the Sound L
 
 </details>
 
+### Revised Part 3 prompt
+
+Prompt (verbatim, sent November 17, 2026 UTC). ChatGPT helped me draft it:
+
+<details>
+<summary>Full prompt</summary>
+
+```text
+Can you change what I currently have for Part 3 in `aceyq/sound-lab`? I tried the Tilt Sound Map idea, but it feels too similar to the phone instrument I already made for Motion Score. I want Part 3 to use my laptop camera and feel like something I could actually choreograph. Please replace the current Part 3 page with this camera version. Keep Motion Score and the two Vowel Morph workflows available as their own projects.
+The assignment is to take the 2D sound map and use two sensor measurements to control where I am on it. My professor specifically said to try to avoid using x and y positions from the camera. I want to use these two joint angles:
+
+* Right elbow bend. Use my right shoulder, elbow, and wrist to measure how bent my right arm is.
+* Left arm lift. Use my left hip, shoulder, and elbow to measure how far my left upper arm is lifted relative to my torso.
+
+Together, those two angles should give me one spot on the sound map. I want to see my camera preview with the relevant joints marked, the two angle readings, and a dot that moves as I move. Give me a quick way to calibrate a comfortable range for both movements. If the camera loses a joint, show me which one and fade the sound until tracking comes back.
+What I’m most excited about is being able to teach the app what my poses should sound like, then perform the same phrase silently. Let me pick a vowel I already recorded in Vowel Morph if it’s available, hold a pose, and attach the vowel to that pair of angles. Give me a way to record a vowel on this page too, plus a starter set I can use to try it right away. Reuse the sound blending from the 2D vowel map so I can move between poses and hear one synthesized sound change as I go.
+Here’s what I want to be able to do in class:
+
+1. Start with my right arm straight and my left arm down for “ah.”
+2. Slowly bend my right elbow while keeping my left arm down and hear it glide toward “ee.”
+3. Lift my left arm on a sharp count to shift toward “oo.”
+4. Freeze for an extra count, then do the movement backward and hear the sound follow me back through the vowels.
+
+I want the sound to follow the pose I’m actually holding, so I can change the timing, pause, or go backward whenever I want. Once that works, I’d love an optional clap when I enter the final pose region. It should fire once when I enter, stay quiet while I hold the pose, and be ready to play again once I leave and come back. Use the same two angles for that too. Get the vowel mapping working first since that’s the main assignment.
+Could you also add the click-through tutorial like the ones in my other apps? Give it a Tour button and Back, Next, and Done controls. I want it to highlight the actual controls on the page as I go. Walk me through enabling the camera, getting my arms in frame, calibrating the angles, trying the starter poses, assigning a vowel to my own pose, and performing the short phrase. If the clap is included, show how to turn it on at the end. Let me close and reopen the tour when I want.
+Please test that each angle controls its own axis, that the two angles together control the blend, and that a held pose sustains the sound. Check that the walkthrough works and that the existing Vowel Morph and Motion Score pages still work. Tell me what you checked with simulated inputs and give me a short checklist for what I need to try with my actual camera before class.
+In `AI_USE.md`, update the existing entry for this week. Replace the phone-based Part 3 prompt with the exact text of this revised prompt. Keep Parts 1 and 2 and the earlier weeks in place. Add a short note in plain language that I changed direction after the phone version felt too close to Motion Score, and summarize what you actually implemented and tested. Credit ChatGPT for helping draft this prompt.
+Please commit and push the update, check the deployment, and send me the commit link and the live link for the camera app.
+```
+
+</details>
+
+### Change of direction
+
+I first built Part 3 as a phone-tilt sound map. When I tried it, it felt too close to the phone instrument I had already made for Motion Score. So I asked Claude to replace it with a camera version that uses two joint angles and that I could choreograph.
+
 ### What I wanted
 
-Part 1: confirm that my existing 2D vowel map blends f0 in Hz and each harmonic with distance weights, and get a short explanation with a numerical example. Part 2: record while drawing a curve, with each snippet placed on the curve by timestamp, and whole-take undo. Part 3: a separate page where my phone's pitch and roll angles move a dot on a sound map, with calibration, starter sounds, recording at a pose, and an optional percussion layer.
+Part 1: confirm that my existing 2D vowel map blends f0 in Hz and each harmonic with distance weights, and get a short explanation with a numerical example. Part 2: record while drawing a curve, with each snippet placed on the curve by timestamp, and whole-take undo. Part 3: use my laptop camera to measure my right elbow bend and left arm lift, use those two angles to move around the vowel map, teach the app which vowel goes with which pose, and perform a short ah → ee → oo phrase, with an optional clap and a guided tour.
 
 ### What Claude implemented and verified
 
 - Part 1: Claude checked the existing map and left it unchanged. It already uses normalized inverse-distance-squared weights, a plain weighted average of f0 in Hz and of each harmonic, and an exact snap onto a dot when you click it. The explanation and example are in `CAPSTONE_MAP_UPDATE.md`.
 - Part 2: Claude added "✏️ Draw + record a take" to the Vowel Morph square. It uses 0.2 s snippets every 0.1 s, matches audio to pointer by timestamp, and reuses the single-vowel analysis. Silent or unreliable snippets are skipped and counted. The page shows the path and learned points, replays a take along its path, and undoes only the latest take.
-- Part 3: Claude added a separate "4. Tilt Sound Map" page. It reuses Motion Score's phone pairing and phone page, plus Vowel Morph's blending and synthesizer. It has neutral and range calibration, four starter sounds, recording at a pose, a fade when tracking drops, and kick/snare/clap regions with a boundary buffer.
-- Checks Claude ran, all with simulated input (synthetic microphone tones, scripted mouse and synthetic phone orientation): 172 unit tests and the build pass. The drawn-take browser script passed 20/20, including a slow-then-fast curve whose points matched the sound sung at that moment, and undo removing only the latest take. The tilt-map browser script passed 26/26, including each angle moving one axis, the fade when tracking drops, one hit while holding still in a drum region, and a real PeerJS pairing with a simulated phone.
+- Part 3: Claude replaced the phone page with a "4. Pose Sound Map" page. It runs MediaPipe pose tracking in the browser, with the model hosted on the site. Right elbow bend moves the dot left/right and left arm lift moves it up/down. It has two-pose calibration with a countdown, names lost joints and fades the sound, and offers starter vowels laid out for the phrase. You can attach Vowel Morph vowels to held poses or record new ones there, turn on an optional clap that fires once on entering the final pose, and use a 13-step tour with Back, Next and Done. Motion Score and Vowel Morph are unchanged, and the old phone page link now opens the camera page.
+- Checks Claude ran, all with simulated input: 174 unit tests and the build pass. The drawn-take browser script passed 20/20. The pose browser script passed 38/38, using generated body landmarks fed through the page's pose handler: each angle moved only its own axis, the two angles together set the blend, a held pose sustained the sound, a lost joint faded it, the ah → ee → oo → back phrase matched each starter, the clap fired once per entry, and the tour worked. The same script started the real pose model on Chromium's fake camera (no person). The Motion Score checks passed 67/67.
 
 ### My own testing
 
-To confirm: recording and drawing with my own voice and microphone, listening to the blends, and trying the tilt map and percussion on my own phone.
+To confirm: recording and drawing with my own voice and microphone, listening to the blends, and trying the pose map with my own body in front of my laptop camera.

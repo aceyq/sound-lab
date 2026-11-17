@@ -1,10 +1,9 @@
-// Capstone parts 2 and 3: drawn-take alignment and the tilt sound map.
+// Capstone parts 2 and 3: drawn-take alignment and the camera Pose Sound Map.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { estimateStartMs, positionAt, snippetWindows, analyzeDrawnTake, takeAnchors, undoLastTake, cleanTake, WINDOW_SEC } from '../src/pages/vowel-morph/take-model.js';
 import { blendAt, idwWeights, loadProject as loadMorph } from '../src/pages/vowel-morph/morph-model.js';
-import { anglesToPoint, pointToAngles, anglesFromUp, rangeFromSamples, averageUp, PercussionGate, DRUM_REGIONS, DRUM_BUFFER, isStale, formantAmps, starterAnchors, loadProject, smoothPoint } from '../src/pages/tilt-map/tilt-model.js';
-import { upFromAngles } from '../src/pages/motion-score/mapping.js';
+import { angleAt, poseAngles, anglesToPoint, pointToAngles, heldAngles, calibrate, smoothAngles, anchorPoint, starterAnchors, formantAmps, RegionTrigger, loadProject, LM, DEFAULT_CAL, CLAP_BUFFER } from '../src/pages/pose-map/pose-model.js';
 
 const SR = 48000;
 function tone(f0Of, sec, amps = [1, 0.6, 0.4, 0.3, 0.2]) {
@@ -100,83 +99,125 @@ test('Vowel Morph projects keep takes through save/load; old projects get an emp
   assert.deepEqual(loadMorph({ vowels: [] }).takes, []);
 });
 
-// ── part 3 ──
-test('each angle moves exactly one axis; neutral is the centre', () => {
-  const R = { pitch: 30, roll: 40 };
-  assert.deepEqual(anglesToPoint({ pitch: 0, roll: 0 }, R), { x: 0.5, y: 0.5 });
-  const a = anglesToPoint({ pitch: 15, roll: 0 }, R);
-  assert.equal(a.x, 0.5); assert.equal(a.y, 0.75);
-  const b = anglesToPoint({ pitch: 0, roll: -20 }, R);
-  assert.equal(b.y, 0.5); assert.equal(b.x, 0.25);
-  assert.deepEqual(anglesToPoint({ pitch: 99, roll: -99 }, R), { x: 0, y: 1 });
-  assert.deepEqual(anglesToPoint({ pitch: 15, roll: 20 }, R, { pitch: true, roll: true }), { x: 0.25, y: 0.25 });
-  const back = pointToAngles({ x: 0.75, y: 0.25 }, R);
-  assert.ok(Math.abs(back.roll - 20) < 1e-9 && Math.abs(back.pitch + 15) < 1e-9);
+// ── part 3: camera pose ──
+// A synthetic body: 33 landmarks, all visible, with the right arm and left
+// arm set by the two angles we want to measure (2D, x right, y down).
+const D = Math.PI / 180;
+function body({ bend = 0, lift = 15, hideJoint = null, vis = 0.99 } = {}) {
+  const lms = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, z: 0, visibility: vis }));
+  const set = (i, x, y) => { lms[i] = { x, y, z: 0, visibility: vis }; };
+  // person's right shoulder appears on image left (camera not mirrored)
+  set(LM.rightShoulder, 0.40, 0.35); set(LM.leftShoulder, 0.60, 0.35);
+  set(LM.rightHip, 0.42, 0.70); set(LM.leftHip, 0.58, 0.70);
+  // right upper arm hangs down; forearm rotates by `bend`
+  set(LM.rightElbow, 0.40, 0.50);
+  set(LM.rightWrist, 0.40 + 0.15 * Math.sin(bend * D), 0.50 + 0.15 * Math.cos(bend * D));
+  // left upper arm rotates out from the torso line by `lift`
+  const hipDir = Math.atan2(0.70 - 0.35, 0.58 - 0.60); // shoulder → hip
+  const a = hipDir - lift * D; // rotate away from the body
+  set(LM.leftElbow, 0.60 + 0.15 * Math.cos(a), 0.35 + 0.15 * Math.sin(a));
+  set(LM.leftWrist, 0.60 + 0.3 * Math.cos(a), 0.35 + 0.3 * Math.sin(a));
+  if (hideJoint != null) lms[hideJoint].visibility = 0.1;
+  return lms;
+}
+
+test('joint angles: elbow bend and arm lift are measured from the right joints', () => {
+  assert.ok(Math.abs(angleAt({ x: 1, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 1 }) - 90) < 1e-9);
+  for (const [bend, lift] of [[0, 15], [60, 15], [110, 15], [0, 90], [100, 140]]) {
+    const r = poseAngles(body({ bend, lift }), { aspect: 1 });
+    assert.ok(r.ok, JSON.stringify(r.lost));
+    assert.ok(Math.abs(r.bend - bend) < 0.01, `bend ${r.bend} vs ${bend}`);
+    assert.ok(Math.abs(r.lift - lift) < 0.01, `lift ${r.lift} vs ${lift}`);
+  }
 });
 
-test('angles from phone orientation vectors are relative to neutral and independent', () => {
-  const up0 = upFromAngles(20, 0);
-  const f = anglesFromUp(upFromAngles(5, 0), up0); // top tilted toward you by 15°
-  assert.ok(Math.abs(f.pitch - 15) < 1e-6 && Math.abs(f.roll) < 1e-6, JSON.stringify(f));
-  const s = anglesFromUp(upFromAngles(20, -12), up0);
-  assert.ok(Math.abs(s.roll - 12) < 0.5 && Math.abs(s.pitch) < 0.5, JSON.stringify(s));
-  const n = averageUp([upFromAngles(19, 1), upFromAngles(21, -1)]);
-  assert.ok(Math.abs(anglesFromUp(n, up0).pitch) < 0.01);
+test('each angle drives only its own map axis', () => {
+  const at = (bend, lift) => anglesToPoint(poseAngles(body({ bend, lift }), { aspect: 1 }), DEFAULT_CAL);
+  const a = at(15, 15);
+  const b = at(100, 15); // only the elbow changes
+  const c = at(15, 90); // only the arm lift changes
+  assert.ok(Math.abs(a.y - b.y) < 1e-9 && b.x > a.x + 0.5);
+  assert.ok(Math.abs(a.x - c.x) < 1e-9 && c.y > a.y + 0.5);
+  const back = pointToAngles(anglesToPoint({ bend: 70, lift: 60 }));
+  assert.ok(Math.abs(back.bend - 70) < 1e-9 && Math.abs(back.lift - 60) < 1e-9);
 });
 
-test('blend at the tilt point uses both angles', () => {
-  const anchors = starterAnchors();
-  const R = { pitch: 30, roll: 35 };
-  const at = (pitch, roll) => blendAt(anchors, anglesToPoint({ pitch, roll }, R)).params.f0;
-  const c = at(0, 0);
-  assert.notEqual(at(10, 0), c);
-  assert.notEqual(at(0, 10), c);
-  assert.notEqual(at(10, 10), at(10, 0));
-  assert.notEqual(at(10, 10), at(0, 10));
+test('a lost joint is named and its angle is not used', () => {
+  const r = poseAngles(body({ bend: 40, hideJoint: LM.rightWrist }), { aspect: 1 });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.lost, ['right wrist']);
+  assert.ok(Number.isNaN(r.bend) && Number.isFinite(r.lift));
+  const none = poseAngles(null);
+  assert.equal(none.noPerson, true);
 });
 
-test('comfortable range from samples: 90th percentile, clamped', () => {
-  const s = Array.from({ length: 100 }, (_, i) => ({ pitch: (i - 50) * 0.5, roll: (i - 50) * 1.2 }));
-  const r = rangeFromSamples(s);
-  assert.ok(r.pitch >= 20 && r.pitch <= 25 && r.roll >= 50 && r.roll <= 60, JSON.stringify(r));
-  assert.deepEqual(rangeFromSamples([]), { pitch: 30, roll: 35 });
+test('world landmarks (metres) are preferred when present', () => {
+  const lms = body({ bend: 30, lift: 30 });
+  const world = body({ bend: 80, lift: 120 }).map((p) => ({ x: p.x, y: p.y, z: 0 }));
+  const r = poseAngles(lms, { world, aspect: 1 });
+  assert.ok(Math.abs(r.bend - 80) < 0.01 && Math.abs(r.lift - 120) < 0.01);
 });
 
-test('percussion: one hit per entry, a shaky boundary does not retrigger, leaving re-arms', () => {
-  const g = new PercussionGate(DRUM_REGIONS);
-  const kick = DRUM_REGIONS.find((r) => r.id === 'kick');
-  const at = (d) => ({ x: kick.x + d, y: kick.y });
-  let t = 0;
+test('calibration from the two held poses maps them to opposite corners', () => {
+  const rest = heldAngles(Array.from({ length: 20 }, (_, i) => ({ bend: 8 + (i % 3), lift: 18 + (i % 2) })));
+  const full = heldAngles(Array.from({ length: 20 }, (_, i) => ({ bend: 118 + (i % 3), lift: 128 + (i % 2) })));
+  const cal = calibrate(rest, full);
+  assert.deepEqual(anglesToPoint(rest, cal), { x: 0, y: 0 });
+  assert.deepEqual(anglesToPoint(full, cal), { x: 1, y: 1 });
+  assert.equal(heldAngles([{ bend: 1, lift: 2 }]), null);
+  const narrow = calibrate({ bend: 50, lift: 50 }, { bend: 55, lift: 52 });
+  assert.ok(narrow.bend.hi - narrow.bend.lo >= 20);
+});
+
+test('both angles together set the blend; a held pose gives a steady sound', () => {
+  const anchors = starterAnchors().map((a) => ({ ...a, pos: anchorPoint(a, DEFAULT_CAL) }));
+  const f0 = (bend, lift) => blendAt(anchors, anglesToPoint({ bend, lift })).params.f0;
+  const ah = f0(DEFAULT_CAL.bend.lo + 0.1 * 115, DEFAULT_CAL.lift.lo + 0.1 * 105);
+  assert.ok(Math.abs(ah - 196) < 1e-9); // exactly on the "ah" starter
+  const mid = f0(70, 60);
+  assert.notEqual(f0(90, 60), mid);
+  assert.notEqual(f0(70, 80), mid);
+  assert.notEqual(f0(90, 80), f0(90, 60));
+  assert.notEqual(f0(90, 80), f0(70, 80));
+  let s = { bend: 70, lift: 60 };
+  for (let i = 0; i < 100; i++) s = smoothAngles(s, { bend: 70, lift: 60 }, 0.02);
+  assert.equal(f0(s.bend, s.lift), mid);
+});
+
+test('taught poses follow their angles through a new calibration', () => {
+  const a = { angles: { bend: 72.5, lift: 67.5 }, pos: null };
+  assert.deepEqual(anchorPoint(a, DEFAULT_CAL), { x: 0.5, y: 0.5 });
+  const cal = { bend: { lo: 50, hi: 95 }, lift: { lo: 45, hi: 90 } };
+  assert.deepEqual(anchorPoint(a, cal), { x: 0.5, y: 0.5 });
+});
+
+test('clap: once on entering, quiet while held or shaking at the edge, again after leaving', () => {
+  const region = { x: 0.9, y: 0.9, r: 0.16 };
+  const t = new RegionTrigger();
+  let now = 0;
   const hits = [];
-  const step = (d) => { t += 20; hits.push(...g.update(at(d), t)); };
-  step(0.4); // far away
-  step(kick.r - 0.01); // enter → hit
-  for (let i = 0; i < 50; i++) step(kick.r + (i % 2 ? 0.02 : -0.02)); // shaking across the edge, inside the buffer
-  for (let i = 0; i < 50; i++) step(0); // holding still in the middle
-  assert.deepEqual(hits, ['kick']);
-  step(kick.r + DRUM_BUFFER + 0.01); // really left
-  step(kick.r - 0.02); // back in → second hit
-  assert.deepEqual(hits, ['kick', 'kick']);
-  const g2 = new PercussionGate(DRUM_REGIONS);
-  g2.prime({ x: kick.x, y: kick.y });
-  assert.deepEqual(g2.update({ x: kick.x, y: kick.y }, 0), []); // switching percussion on inside a region does not hit
-});
-
-test('tracking goes stale after 400 ms without phone readings', () => {
-  assert.equal(isStale(1000, 1300), false);
-  assert.equal(isStale(1000, 1450), true);
-  assert.equal(isStale(-Infinity, 0), true);
+  const step = (x) => { now += 20; if (t.update({ x, y: 0.9 }, region, now)) hits.push(now); };
+  step(0.4); step(0.6);
+  step(0.8); // enter → clap
+  for (let i = 0; i < 100; i++) step(0.85); // hold
+  for (let i = 0; i < 40; i++) step(0.9 - region.r + (i % 2 ? 0.03 : -0.03)); // shaking across the edge
+  assert.equal(hits.length, 1);
+  step(0.9 - region.r - CLAP_BUFFER - 0.02); // leave past the buffer
+  step(0.85); // come back
+  assert.equal(hits.length, 2);
+  const t2 = new RegionTrigger();
+  t2.prime({ x: 0.9, y: 0.9 }, region);
+  assert.equal(t2.update({ x: 0.9, y: 0.9 }, region, 1000), false);
 });
 
 test('starter sounds and project loading', () => {
-  const ah = formantAmps(165, [[730, 90, 1], [1090, 110, 0.5], [2440, 170, 0.2]]);
+  const ah = formantAmps(196, [[730, 90, 1], [1090, 110, 0.5], [2440, 170, 0.2]]);
   assert.equal(ah.length, 48);
   assert.equal(Math.max(...ah), 1);
-  const strongest = ah.indexOf(1) + 1;
-  assert.ok(strongest * 165 > 500 && strongest * 165 < 900, `strongest harmonic ${strongest}`);
   const p = loadProject(null);
-  assert.equal(p.anchors.length, 4);
-  assert.equal(loadProject({ anchors: [{ pos: { x: 0.5, y: 0.5 }, analysis: { f0: 0, amps: [1] } }] }).anchors.length, 0);
-  const sp = smoothPoint({ x: 0, y: 0 }, { x: 1, y: 1 }, 0.06);
-  assert.ok(sp.x > 0.6 && sp.x < 0.65);
+  assert.deepEqual(p.anchors.map((a) => a.name), ['Starter “ah”', 'Starter “ee”', 'Starter “oo”', 'Starter “eh”']);
+  assert.equal(p.clap.on, false);
+  const q = loadProject({ anchors: [{ name: 'x', angles: { bend: 50, lift: 40 }, analysis: { f0: 200, amps: [1] } }, { analysis: { f0: 0, amps: [1] }, pos: { x: 0, y: 0 } }], cal: { bend: { lo: 10, hi: 12 } } });
+  assert.equal(q.anchors.length, 1);
+  assert.deepEqual(q.cal.bend, DEFAULT_CAL.bend);
 });

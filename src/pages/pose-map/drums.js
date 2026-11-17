@@ -1,4 +1,4 @@
-// Three short synthesized drums for the Tilt Sound Map's percussion layer.
+// Three short synthesized drums for the Pose Sound Map's clap (kick and snare are kept for later use).
 // Each hit builds a few Web Audio nodes that stop and are released after
 // about half a second. Nothing is sampled or loaded from files.
 

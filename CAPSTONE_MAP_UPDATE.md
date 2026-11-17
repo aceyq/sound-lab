@@ -1,4 +1,4 @@
-# Capstone: 2D vowel map, drawn takes and Tilt Sound Map
+# Capstone: 2D vowel map, drawn takes and Pose Sound Map
 
 Three parts, all in the Sound & Signals Lab site:
 
@@ -6,7 +6,7 @@ Three parts, all in the Sound & Signals Lab site:
 |---|---|---|
 | 1 | **3. Vowel Morph → 2D sound space** (`#/vowel-morph`) | Existing map, checked and kept as it was |
 | 2 | Same square, new **✏️ Draw + record a take** mode | Record while drawing; snippets become points along the curve |
-| 3 | **4. Tilt Sound Map** (`#/tilt-map`), a separate page | Phone pitch and roll angles move a dot on a sound map, with an optional drum layer |
+| 3 | **4. Pose Sound Map** (`#/pose-map`), a separate page | Two joint angles from the laptop camera move a dot on the vowel map, with an optional clap |
 
 ## Part 1: the 2D vowel map (checked, not changed)
 
@@ -42,25 +42,32 @@ The map only accepts sounds that have a usable pitch: a vowel whose analysis fin
 6. The square shows the drawn path and the learned points in the take's colour. In **Play / explore**, click near or between points to hear the normal blend, drag along the curve, or press **▶ Replay along path** to move the marker along the take at its original speed.
 7. **↶ Undo last take** removes only the most recent take and its recording. Placed vowels and older takes stay. Each take can also be hidden or deleted.
 
-## Part 3: Tilt Sound Map
+## Part 3: Pose Sound Map (camera)
 
-- **Pairing:** the same PeerJS pairing and phone page as Motion Score (unchanged). Scan the QR code and tap Enable Sensors on the phone. The phone screen still uses Motion Score's wording ("pitch", "richness"); the laptop page shows the real angles.
-- **Angles:** forward/back tilt (pitch, + = top toward you) moves the dot up and down. Sideways tilt (roll, + = right edge down) moves it left and right. Both are measured from your neutral pose with Motion Score's `relativeGestures`.
-- **Calibrate:** "◎ Set neutral" averages 1 s of readings. "↔ Measure my range" watches you tilt for 5 s and sets each range to the 90th percentile of the angles it saw. The range sliders (±8–80°) and flip checkboxes can be changed by hand. ±range reaches the edge of the map.
-- **Sounds:** four starter vowels ("ah" 165 Hz left, "ee" 247 Hz right, "oo" 131 Hz bottom, "eh" 196 Hz top) built from textbook formants. **● Record at current pose** records 2–4 s, analyzes it with the Vowel Morph analysis and pins it where the dot was. **Copy dots from my Vowel Morph map** brings in your placed vowels.
-- **Blend:** the same `blendAt` inverse-distance rule as part 1, played by the same synthesizer.
-- **Tracking drop:** if no phone reading arrives for 400 ms, or the phone page is hidden, the sound fades out (about 0.12 s time constant). It fades back in when readings return.
-- **Percussion (toggle):** Kick bottom-left, Snare top-left, Clap top-right (radius 0.12). Entering a region plays its drum once. The region re-arms only after the dot moves 0.05 past its edge (the dashed ring), so a shaky wrist on the boundary does not retrigger. The last drum is shown next to the toggle, and the phone flashes on each hit.
-- **Laptop simulation:** two sliders stand in for the angles if the network blocks pairing.
+The first version of part 3 used phone tilt (the "Tilt Sound Map"). It felt too close to Motion Score, so on November 17, 2026 (UTC) it was replaced by this camera version. The old `#/tilt-map` link now opens the Pose Sound Map.
+
+- **Tracking:** the laptop camera is analyzed in the browser by MediaPipe Pose Landmarker (lite model, Apache 2.0). The WebAssembly runtime and the 5.8 MB model are served by this site (`public/models/`, plus `public/mediapipe/wasm/` copied from `node_modules` at build time), so no CDN is needed. Video never leaves the computer.
+- **Two joint angles, not x/y positions:**
+  - *Right elbow bend* = 180° − the angle at the right elbow between the right shoulder and the right wrist (0° = straight arm). It moves the dot left ↔ right.
+  - *Left arm lift* = the angle at the left shoulder between the left hip and the left elbow (about 15° hanging, 90° out to the side). It moves the dot down ↕ up.
+  - The angles use MediaPipe's 3D "world" landmarks, so bending toward the camera still counts. They are lightly smoothed (80 ms).
+- **Calibrate:** "① Capture start pose" (right arm straight, left arm down) and "② Capture full pose" (elbow bent, arm lifted, both as far as is comfortable). Each counts down 3 s and then takes the median of 1 s of readings. The start pose becomes the bottom-left corner and the full pose the top-right.
+- **Lost joints:** if any of the six joints (right shoulder, elbow, wrist; left hip, shoulder, elbow) falls below 50 % visibility for 0.25 s, or no camera frame arrives for 0.5 s, the page names the lost joint, marks it with a red ✕ in the preview, and fades the sound out (0.15 s time constant). The sound fades back in when tracking returns.
+- **Sounds:** the starter set follows the class phrase: "ah" (arm straight, left arm down), "ee" (elbow bent, left arm down), "oo" (elbow bent, left arm lifted) and "eh" (arm straight, left arm lifted). **📌 Attach to my pose** pins a Vowel Morph vowel (listed first when this browser has some) or a starter to the angles you hold for 1 s after a countdown. **● Record a vowel at my pose** records 3 s while you hold a pose and analyzes it with the Vowel Morph analysis. Taught poses are stored as angles, so they stay with the pose if you recalibrate.
+- **Blend:** the same `blendAt` inverse-distance rule as part 1 and the same synthesizer. There is no timeline: the sound always follows the pose you are holding, so holding still sustains it, and you can pause or go backward whenever you like.
+- **Clap (toggle):** a ring around the final "oo" pose (radius 0.16). It claps once on entering, stays quiet while you hold, and re-arms only after you leave past the dashed ring (0.06 further). "Use my current pose as the clap region" moves it.
+- **Tour:** 13 steps covering the camera, framing, both calibration poses, the angles, starter poses, starting the sound, picking and attaching a vowel, recording here, your sounds, the phrase and the clap. It has Back, Next and Done (plus Close), and can be reopened any time.
+- **Practice without camera:** two sliders stand in for the angles.
 
 ## What was checked, and how
 
-All checks below used **simulated input**. None of them used your voice, your microphone or your phone.
+All checks below used **simulated input**. None of them used your voice, your microphone or a real person in front of your camera.
 
-- `npm test`: 172 unit tests pass (15 new in `test/capstone-parts.test.js`).
+- `npm test`: 174 unit tests pass (17 in `test/capstone-parts.test.js`).
 - `npm run build`: passes.
 - `scripts/verify-drawn-take.mjs`: 20/20 checks. getUserMedia was replaced by a synthetic harmonic "voice", and the mouse was driven by Playwright. It checks part 1 clicks (on a dot = exact, midpoint = 50/50 blend of f0 and harmonics, one continuous voice while dragging). It checks a curved take drawn slowly through 1.6 s of a 150 Hz "ah" recipe, then fast through 0.9 s of a 300 Hz "ee" recipe. Every point on the slow part was 150 Hz and every point on the fast part 300 Hz, and 58 % of points sat on the slow first quarter of the path, which shows alignment by time rather than even spacing. It also checks replay, undo removing only the latest take, a silent take, and reload.
-- `scripts/verify-tilt-map.mjs`: 26/26 checks. It checks each angle alone moving one axis, the blend changing with either angle and with both, recording at a pose, and neutral calibration. It checks the fade on a tracking drop and on a hidden phone page, and the fade back in. It checks one kick while holding still in the region for 2 s, no retrigger during a ±1.5° wobble across the edge, re-hits after leaving, snare and clap, and percussion off. It also runs a **real PeerJS pairing** with the unchanged phone page in a second browser tab, sending synthetic orientation samples.
+- `scripts/verify-pose-map.mjs`: 38/38 checks. Generated stick-figure landmarks are fed through the page's own pose handler. It checks each angle moving only its own axis, the two angles together setting the blend, and a held pose sustaining a steady sound for 2 s. It checks that a lost right wrist is named and fades the sound, and that sound returns with the joint. It checks the countdown calibration, the class phrase (ah → ee → oo → freeze → back to ee → ah, exactly matching each starter), attaching a Vowel Morph vowel, recording here with a synthetic 233 Hz mic, one clap per entry with no retrigger on the edge, and the full tour (Back, Next, Done, Close, reopen). It also starts the **real MediaPipe model on Chromium's fake camera** (a test pattern with no person) to confirm it loads from the site and tracks nothing. Last, it confirms Vowel Morph, Motion Score and Frequency Playground still open.
+- `scripts/verify-motion.mjs`: 67/67 (Motion Score unchanged).
 - `scripts/verify-vowel-morph.mjs` (older): stops at its fake-microphone recording step **with and without these changes** (checked on the previous commit too), so that is a pre-existing problem with Chromium's file-based fake microphone on this Mac, not a regression. The new drawn-take script covers the 2D clicks instead.
 
-Not covered: listening, real singing into a real microphone, a real phone's sensors, latency or comfort.
+Not covered: listening, real singing into a real microphone, a real person in front of a real camera (tracking accuracy, lighting, clothing, distance), latency, or comfort.
