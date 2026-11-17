@@ -2980,6 +2980,8 @@ What Claude tested, all with simulated input: 175 unit tests and the build pass.
 - The displayed Hz, vowel percentages and harmonic graph matched what the synth was playing.
 - The real pose model ran on Chromium's fake camera, and Vowel Morph, Motion Score and Frequency Playground still open.
 
+Reverted: after trying the head-tilt version, I found it less intuitive, so I asked Claude to go back to the previous camera version (right elbow bend and left arm lift, commit `a4bd963`). The follow-up prompt above stays here as a record of what I tried.
+
 ### My own testing
 
-To confirm: recording and drawing with my own voice and microphone, listening to the blends, and trying the pose map (elbow for the vowel, head tilt for the pitch) with my own body in front of my laptop camera.
+To confirm: recording and drawing with my own voice and microphone, listening to the blends, and trying the pose map (right elbow bend and left arm lift) with my own body in front of my laptop camera.
