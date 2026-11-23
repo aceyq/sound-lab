@@ -1,38 +1,49 @@
-// Click-through tour for the Pose Sound Map (shared spotlight Tour from
-// src/lib/tour.js). It highlights real controls one at a time and never
-// turns on the camera, records, plays or changes anything by itself.
+// Click-through tour for Motion Morph (shared spotlight Tour from
+// src/lib/tour.js). It highlights real controls one at a time with Back,
+// Next and Done. It never turns on the camera, records, plays or changes a
+// sound by itself; the only thing it does is open the (empty) "Add my sound"
+// panel so the recording steps have something to point at.
 
-export function poseTourSteps({ camBtn, overlay, restBtn, fullBtn, angleCard, square, soundBtn, vowelSel, attachBtn, recBtn, listEl, performCard, clapCard }) {
+export function poseTourSteps({ camBtn, overlay, angleCard, square, soundBtn, weightsOut, harmCanvas, addBtn, drawBtn, undoTakeBtn, adjustBtn, rangeCard, listEl, openAdd, q }) {
+  const inAdd = (sel) => () => q(`.pm-add ${sel}`);
   return [
     { id: 'camera', target: () => camBtn, title: 'Turn on the camera',
-      body: 'Press Enable camera and allow it in the browser. The pose model (about 6 MB) loads the first time. The video is analyzed on this computer and never uploaded.',
+      body: 'Press Enable camera and allow it in the browser. The pose model (about 6 MB) loads the first time. The video is analyzed on this computer and never uploaded. No setup is needed after this: a default movement range is already in place.',
       tryIt: 'Press Enable camera.' },
     { id: 'frame', target: () => overlay, title: 'Get your arms in frame',
-      body: 'Step back until your shoulders, elbows, wrists and hips are all visible. Blue marks the right shoulder–elbow–wrist (elbow bend); pink marks the left hip–shoulder–elbow (arm lift). A red ✕ means that joint is lost, and the sound fades until it comes back.',
-      tryIt: 'Check that all six joints have dots, no ✕.' },
-    { id: 'cal-rest', target: () => restBtn, title: 'Calibrate: start pose',
-      body: 'Press this, step back during the 3-second countdown, and hold your start pose (right arm straight, left arm down) for 1 second. That becomes the bottom-left corner of the map.' },
-    { id: 'cal-full', target: () => fullBtn, title: 'Calibrate: full pose',
-      body: 'Then capture your full pose: right elbow bent and left arm lifted as far as is comfortable. That becomes the top-right corner. Everything in between is spread across the map.' },
+      body: 'Step back until both shoulders, elbows, wrists and hips are visible. Blue marks the right shoulder–elbow–wrist (elbow bend); pink marks the left hip–shoulder–elbow (arm lift). A red ✕ means that joint is lost: the sound fades until it comes back.',
+      tryIt: 'Check that all six joints have dots and no ✕.' },
     { id: 'angles', target: () => angleCard, title: 'Your two angles',
-      body: 'Right elbow bend moves the dot left ↔ right; left arm lift moves it down ↕ up. Each angle changes only its own direction on the map, and the bars show where you are inside your calibrated range.',
-      tryIt: 'Bend only your right elbow, then lift only your left arm, and watch the dot.' },
-    { id: 'starters', target: () => square, title: 'Try the starter poses',
-      body: 'The starter set is already on the map: “ah” (arm straight, left arm down), “ee” (elbow bent, left arm down), “oo” (elbow bent, left arm up) and “eh” (arm straight, left arm up). Between them, the pitch and every harmonic blend by distance into one sound.' },
-    { id: 'sound', target: () => soundBtn, title: 'Start the sound',
-      body: 'Press Start sound. The sound keeps playing while you hold a pose and glides as you move. Stop sound fades it out.',
-      tryIt: 'Press Start sound and move slowly between the starter poses.' },
-    { id: 'pick', target: () => vowelSel, title: 'Assign a vowel to your own pose',
-      body: 'Choose a vowel you recorded in Vowel Morph (listed first, if this browser has any) or a starter sound.' },
-    { id: 'attach', target: () => attachBtn, title: 'Hold the pose and attach',
-      body: 'Press Attach, get into your pose during the countdown and hold it for 1 second. The sound is pinned to that pair of angles and appears as a dot on the map.' },
-    { id: 'record', target: () => recBtn, title: 'Or record a new vowel here',
-      body: 'Type a name, press Record, get into your pose, then sing one steady vowel for 3 seconds while holding it. It is analyzed like in Vowel Morph and attached to the pose you held.' },
+      body: 'Right elbow bend moves the marker left ↔ right; left arm lift moves it down ↕ up. Each bar shows where you are inside the movement range, with the range ends written underneath.',
+      tryIt: 'Bend only your right elbow, then lift only your left arm, and watch the marker.' },
+    { id: 'starters', target: () => soundBtn, title: 'Try the starter sounds',
+      body: 'Press Start sound. Four starter vowels sit near the corners of the map: “ah” (arm straight, left arm down), “ee” (elbow bent, left arm down), “oo” (elbow bent, left arm up) and “eh” (arm straight, left arm up). Hold a pose and the sound holds; move and it glides.',
+      tryIt: 'Press Start sound and move slowly from “ah” toward “ee”.' },
+    { id: 'mix', target: () => weightsOut.closest('.pm-sound'), title: 'See what you are hearing',
+      body: 'The coloured bars show how much each sound contributes at your pose (a drawn take counts as one sound). The fundamental in Hz and the harmonic graph are exactly what the synthesizer is playing: one pitch and 48 harmonic strengths, blended from the nearby sounds.' },
+    { id: 'add', target: () => addBtn, title: 'Add my sound',
+      body: 'This opens a short panel for teaching the map one sound of your own: record it, check it, then choose the pose that plays it.' },
+    { id: 'record', target: inAdd('.pm-rec'), before: openAdd, title: 'Record a steady sound',
+      body: 'Name it and press Record: make one steady pitched sound for 3 s near the laptop. Sung vowels, humming (“mmm”) and other sustained notes work. Whispers, “s”/“sh”, clicks and speech have no single pitch, so the app tells you and lets you try again.',
+      tryIt: 'Record a hum or a vowel.' },
+    { id: 'check', target: () => q('.pm-add-steps > li:nth-child(2)'), before: openAdd, title: 'Check what the app heard',
+      body: 'Here the app lists what it measured (the fundamental in Hz, how steady it was, how many harmonics stood out) and what it will synthesize at your pose. Compare ▶ Original with ▶ Synthesized; redo the recording if you want.' },
+    { id: 'pose', target: () => q('.pm-add-steps > li:nth-child(3)'), before: openAdd, title: 'Assign it to a pose',
+      body: 'Press “Use my pose”, step back during the 3 s countdown (it beeps), and hold a comfortable pose for 1 s. The two angles you held become the sound’s position. Or press “Click the map instead” and click any spot. Either can be redone later.' },
+    { id: 'play-it', target: () => q('.pm-add-steps > li:nth-child(4)'), before: openAdd, title: 'Play it with your arms',
+      body: 'Once the sound has a pose, this step says which pose plays it, and ◆ marks on the angle bars show the target. Get into the pose and the marker lands on its dot; hold it and the sound holds; move back toward another dot and it blends toward that one.' },
+    { id: 'draw', target: () => drawBtn, title: 'Draw + record a take',
+      body: 'Press this, then press down on the map and draw a line or curve while you change your voice, for example “ah → ee → oo”. Let go to finish. Every 0.1 s a 0.2 s snippet is analyzed and placed where your cursor was at that moment (matched by timestamp, so drawing speed does not matter). Silent or unpitched snippets are skipped and counted.' },
+    { id: 'undo', target: () => undoTakeBtn, title: 'Undo a take',
+      body: 'Undo removes only the most recent take. Your recorded sounds and the starters stay where they are. Each take is also listed below with Hide and Delete.' },
+    { id: 'perform', target: () => square, title: 'Move between your sounds',
+      body: 'Your sounds and takes share one map with the starters. A take’s line starts at the filled ●: to play it, start at that pose and move along the line with your arms. Freeze and the sound freezes; go back and it follows you back.',
+      tryIt: 'Start sound, then move from one of your poses to another.' },
+    { id: 'adjust', target: () => adjustBtn, title: 'Optional: adjust to my movement',
+      body: 'If the marker is too jumpy or you cannot reach part of the map, press this. After a 3 s countdown, move both arms comfortably for 6 s; the app sets the range to what you actually used and tells you how the response changed (for example “10° of elbow bend now moves the marker 12 % of the map”). Undo range change goes back.' },
+    { id: 'tune', target: () => rangeCard, title: 'Fine-tune, and what happens to saved poses',
+      body: '“Fine-tune the range” has one-click fixes per angle (“Small moves jump too far”, “I can’t reach the edges”) and sliders for each end. Your saved sounds are stored as poses, so after any range change the same pose still plays the same sound; their dots just move (faint circles show where they were). Starters stay at the corners.' },
     { id: 'list', target: () => listEl, title: 'Your sounds',
-      body: 'Every sound on the map with its pose angles. Remove any you do not want; “Restore starter set” brings the starters back.' },
-    { id: 'perform', target: () => performCard, title: 'Perform the phrase',
-      body: 'Start with “ah”, bend the right elbow slowly toward “ee”, lift the left arm on a sharp count toward “oo”, freeze an extra count, then go backward. The sound follows the pose you are holding, so the timing is up to you.' },
-    { id: 'clap', target: () => clapCard, title: 'Optional: clap on the final pose',
-      body: 'Turn this on to clap once when you enter the ring around the final pose. It stays quiet while you hold the pose and is ready again after you leave past the dashed ring. “Use my current pose” moves the ring to wherever you are.' },
+      body: 'Every sound with its pose. ▶ Original and ▶ Synthesized play it on its own; ✎ Edit / redo lets you rename it, record it again, or redo its position; 🗑 removes it. Untick “Starter sounds on the map” to play only your own sounds.' },
   ];
 }

@@ -16,7 +16,7 @@ const routes = {
   '/controller': controllerPage,
 };
 // Old link from the previous Project 2.
-const aliases = { '/air-canvas': '/motion-score', '/tilt-map': '/pose-map' };
+const aliases = { '/air-canvas': '/motion-score', '/tilt-map': '/pose-map', '/motion-morph': '/pose-map' };
 
 const outlet = document.getElementById('app');
 let current = null;

@@ -71,3 +71,7 @@ All checks below used **simulated input**. None of them used your voice, your mi
 - `scripts/verify-vowel-morph.mjs` (older): stops at its fake-microphone recording step **with and without these changes** (checked on the previous commit too), so that is a pre-existing problem with Chromium's file-based fake microphone on this Mac, not a regression. The new drawn-take script covers the 2D clicks instead.
 
 Not covered: listening, real singing into a real microphone, a real person in front of a real camera (tracking accuracy, lighting, clothing, distance), latency, or comfort.
+
+## Update (November 23, 2026): Motion Morph
+
+The camera page is now called **Motion Morph** (same `#/pose-map` link; `#/motion-morph` also works). The two-pose calibration was replaced by a default range plus an optional "Adjust to my movement" step (5th–95th percentile of 6 s of free movement, an angle that moved less than 15° keeps its range) and fine-tune buttons/sliders. "Add my sound" (record 3 s → analysis report, ▶ Original / ▶ Synthesized → pose by countdown or by clicking the map → how to play it) and "Draw + record" takes (Vowel Morph's take-model.js, stored as angles) were added. Everything a person places is stored as the two angles of its pose, so recalibrating moves dots on the map but keeps each sound on its pose; starters stay at the range corners. `scripts/verify-pose-map.mjs` was rewritten for the new workflow (69 checks); see AI_USE.md for the prompt and test summary.

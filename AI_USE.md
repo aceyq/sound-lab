@@ -2870,7 +2870,7 @@ Claude found that the blending used semitones and decibels rather than the linea
 
 Claude's checks passed: 157 unit tests, the build, and the browser checks for Vowel Morph (54), noise (22) and the existing apps. Listening tests with my own recordings were not part of these checks.
 
-## Capstone: 2D vowel map, drawn takes and Pose Sound Map (November 14–17, 2026)
+## Capstone: 2D vowel map, drawn takes and Pose Sound Map / Motion Morph (November 14–23, 2026)
 
 ### Prompt for Parts 1 and 2
 
@@ -2982,6 +2982,59 @@ What Claude tested, all with simulated input: 175 unit tests and the build pass.
 
 Reverted: after trying the head-tilt version, I found it less intuitive, so I asked Claude to go back to the previous camera version (right elbow bend and left arm lift, commit `a4bd963`). The follow-up prompt above stays here as a record of what I tried.
 
+### Motion Morph: teach my own sounds and poses
+
+I refer to the camera page as Motion Morph, so Claude renamed it to that in the navigation (the `#/pose-map` link still works).
+
+Prompt (verbatim, sent November 23, 2026 UTC). ChatGPT helped me draft it:
+
+<details>
+<summary>Full prompt</summary>
+
+```text
+I played around with Motion Morph more, and I want to bring it closer to our goal of producing sounds through movements that feel intuitive to the person using it. Right now, I can move between the starter vowels, but I want a clearer way to teach the app my own sounds and decide which poses should produce them.
+
+Please check the current implementation in `aceyq/sound-lab` first and improve the existing Motion Morph page.
+
+**Keep the two arm controls.** I’m using right elbow bend and left arm lift relative to my torso. Those two angles should still determine where I am on the sound map. Show the camera tracking, both angle readings, and the moving marker so I can understand how my pose relates to the sound.
+
+**Let me record a sound and attach it to a pose.** I want to record a steady vowel or another pitched sound, hear the original and synthesized versions, then hold a comfortable pose and save that sound at my current position. A countdown would help so I have time to step back from the laptop before the app captures the pose. Let me name the sound and easily redo either the recording or its position. I should also be able to place the recording by clicking anywhere in the map, like in Vowel Morph.
+
+For now, focus on vowels, humming, and other sounds that the existing pitch and harmonic analysis can reconstruct. If a recording doesn’t give a usable estimate, explain that clearly and let me try again. Make it clear what the app analyzed from my recording and what it will synthesize when I return to that pose.
+
+**Bring over the draw-and-record workflow too.** I want to draw a curve on the map while changing my voice, like “ah → ee → oo,” and have short pieces of that recording attached along the curve. Reuse the timing approach from Vowel Morph so each piece goes where my cursor was when I made it. Then let me move through those points using my arms. Keep the individual recorded sounds and the drawn takes together on the same map, and give me an easy way to undo a take.
+
+The experience I’m aiming for is that I can teach the app a few comfortable poses, then move between them silently and hear the sounds I assigned. If I hold a pose, the sound should hold. If I move back toward another pose, the sound should blend toward it. Reuse the existing blending of fundamental frequency and harmonic amplitudes to produce one synthesized sound.
+
+**Please rethink calibration.** It feels tedious right now, and I’m not sure what each step is doing for me. Check whether a sensible default range would let me start playing as soon as the camera sees my arms. Give me a simple optional “Adjust to my movement” step where I move comfortably for a few seconds and the app estimates my usable range. Show me how that changes the map’s response. I also want an easy way to adjust the range afterward if a small movement sends the marker too far or I can’t reach part of the map.
+
+If I change the calibration after placing sounds, make sure the saved poses still behave predictably. Explain how you handle that so I know whether I need to reposition anything.
+
+**Make the main workflow easy to follow.** I’m picturing opening the camera, trying the starter sounds, then choosing “Add my sound” or “Draw + record.” Once I’ve added something, I should immediately understand how to play it with my arms. Keep the colored vowel or sound contribution percentages and the harmonic graph so I can see the components change as I move. Update the Next/Back tutorial to walk me through recording, assigning a pose, drawing a take, and playing the sounds through movement.
+
+Please test the whole workflow, including whether recorded poses still line up after adjusting the movement range, whether drawing and recording stay aligned, and what happens when tracking drops. Tell me which checks you actually performed and what I need to try with my microphone and camera.
+
+Add this prompt verbatim to the Motion Morph entry in `AI_USE.md`, credit ChatGPT for helping draft it, and briefly summarize the changes and testing in plain language. Then commit and push, check the deployment, and send me the commit link and live app link.
+```
+
+</details>
+
+What changed, in plain language:
+- The two arm angles still drive the map (right elbow bend left ↔ right, left arm lift down ↕ up). The page now opens with a four-step strip: camera, starter sounds, add my sound or draw + record, play with your arms. Each step gets a tick when you've done it.
+- Calibration is optional now. A default range (elbow 15°–130°, arm lift 15°–120°) lets me play as soon as the camera sees my arms. "Adjust to my movement" counts down, then I move freely for 6 seconds. The app sets each range from what I actually used (ignoring the most extreme 5% at each end) and shows how the response changed, for example "10° of elbow bend now moves the marker 14% of the map (was 9%)". An angle I barely moved keeps its old range. Afterwards I can fine-tune each angle with "Small moves jump too far" / "I can't reach the edges" buttons or start/end sliders. There is also one-step undo and a reset to the default.
+- "Add my sound" walks through four steps. I name and record 3 seconds of a steady sound. I check what the app heard (pitch in Hz, how steady it was, how many harmonics stood out) and what it will synthesize, and compare ▶ Original with ▶ Synthesized. If there is no usable pitch (silence, noise, whispering), it says why and how to try again. Then I choose a pose: hold it after a beeping 3 s countdown, or click a spot on the map. Last, it tells me which pose plays the sound, with target marks on the angle bars. I can redo the recording or the position later from the sound list.
+- "Draw + record" uses Vowel Morph's drawn-take code. Each 0.2 s snippet goes where my cursor was at that moment. Takes share the map with my recorded sounds, have their own undo, and I can play them by moving my arms along the line.
+- Saved poses after recalibrating: every sound I place (by pose, by click or by drawing) is saved as the two angles of that pose, not as a spot on the map. After a range change, its dot moves on the map, but holding the same pose still plays exactly that sound, so I don't need to reposition anything. Faint circles briefly show where the dots used to be. The blend between sounds shifts a little because the distances change. Starter sounds stay at the corners of the range. A sound whose pose falls outside a narrowed range gets a dashed ring.
+- The contribution bars (a drawn take counts as one entry) and a live harmonic graph show what the synth is playing. The Back/Next tour now has 16 steps covering camera, starters, recording, checking, assigning a pose, drawing a take, undo, playing by movement and the range.
+
+What Claude tested, all with simulated input (generated body landmarks fed through the page's own pose handler, a synthetic microphone, Playwright's mouse): 186 unit tests and the build pass. The rewritten browser script passed 69 of 69 checks:
+- Default range: tracking and sound start without any calibration. Each angle moves only its own axis, a held pose keeps one steady sound, and the bars add up to 100% and match the synth exactly.
+- Add my sound: a simulated 233 Hz hum was analyzed as 233 Hz, saved at the held pose after the countdown and played at 100% when that pose was held. Redo position updated the same sound, and click-to-place saved the pose that reaches the clicked spot. Noise was rejected with a reason while the earlier sound was kept.
+- Draw + record: a take drawn slowly at 150 Hz and then fast at 300 Hz put the 150 Hz points on the slow part and the 300 Hz points on the fast part, so pieces are matched by time. Moving the simulated arms along the take played about 150 Hz at its start and 300 Hz at its end. Undo removed only the newest take.
+- Recalibration: after "Adjust to my movement" changed both ranges, holding the poses of the recorded hum, the click-placed sound and a take point still played exactly those sounds. The starters didn't move. Narrowing the range flagged a sound as outside it.
+- Tracking drops: a lost joint is named and fades the sound, and no camera frames fades it too. Losing the right elbow during "Use my pose" saved nothing and named the joint. Losing tracking during "Adjust" left the range unchanged and explained why.
+- Sounds, takes, range and original recordings survive a reload. The tour works with Back, Next, Done, Close and reopening, and the page has no sideways scrolling at phone width. The real pose model loads on Chromium's fake camera and tracks nothing, and Vowel Morph, Motion Score and Frequency Playground still open.
+
 ### My own testing
 
-To confirm: recording and drawing with my own voice and microphone, listening to the blends, and trying the pose map (right elbow bend and left arm lift) with my own body in front of my laptop camera.
+To confirm: recording and drawing with my own voice and microphone, listening to the blends, and trying the pose map (right elbow bend and left arm lift) with my own body in front of my laptop camera. For Motion Morph, also: recording a hum and a vowel, holding a pose after the countdown from a few steps back, drawing a take while singing ah → ee → oo, playing everything with my arms, and running "Adjust to my movement" and checking that my saved poses still play the same sounds.

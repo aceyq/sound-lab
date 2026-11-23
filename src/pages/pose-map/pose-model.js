@@ -11,6 +11,20 @@
 //   elbow bend → x (left = straight, right = bent)
 //   arm lift   → y (bottom = down, top = lifted)
 // The point is then blended exactly like the Vowel Morph square.
+//
+// Range. DEFAULT_CAL is a range most people reach without any setup, so the
+// map is playable as soon as the camera sees both arms. "Adjust to my
+// movement" (estimateRange) replaces it with the range a person actually
+// used while moving freely for a few seconds; scaleRange / setRangeEnd are
+// the small manual tweaks afterwards.
+//
+// Saved poses and the range. A sound the person placed (by holding a pose,
+// by clicking the map, or by drawing a take) is stored as the two ANGLES of
+// that pose, never as a map position. Its dot is drawn at
+// anglesToPoint(angles, range), so when the range changes the dot moves on
+// the map, but holding the same pose still lands exactly on it and plays
+// exactly that sound. Starter sounds are the exception: they are defined
+// relative to the range (its corners), so they keep their map position.
 import { MAX_HARMONICS } from '../frequency/vowel-model.js';
 
 // MediaPipe Pose landmark indices ("left"/"right" are the PERSON's sides).
@@ -23,6 +37,10 @@ export const LOST_GRACE_MS = 250; // a joint must be missing this long before th
 export const SMOOTH_TAU = 0.08; // s, light smoothing of the angles
 export const DEFAULT_CAL = Object.freeze({ bend: { lo: 15, hi: 130 }, lift: { lo: 15, hi: 120 } });
 export const MIN_SPAN = 20; // degrees: a calibrated range is never narrower than this
+export const ANGLE_LIMITS = Object.freeze({ bend: [0, 170], lift: [0, 180] }); // what the joints can physically reach
+export const MIN_MOVE = 15; // degrees: an angle that moved less than this while adjusting keeps its old range
+export const MIN_ADJUST_SAMPLES = 30; // tracked frames needed to estimate a range (≈ 1 s of camera)
+export const RANGE_PCT = [5, 95]; // percentiles used as the ends, so a stray frame or a strained extreme does not set the range
 export const CLAP_BUFFER = 0.06; // map units outside the clap region before it re-arms
 export const CLAP_COOLDOWN_MS = 150;
 
@@ -106,6 +124,79 @@ export function calibrate(rest, full, previous = DEFAULT_CAL) {
   return { bend: one(rest && rest.bend, full && full.bend, previous.bend), lift: one(rest && rest.lift, full && full.lift, previous.lift) };
 }
 
+/** p-th percentile (0…100) with linear interpolation; NaN for no data. */
+export function percentile(list, p) {
+  const a = list.filter(Number.isFinite).sort((x, y) => x - y);
+  if (!a.length) return NaN;
+  const k = (Math.max(0, Math.min(100, p)) / 100) * (a.length - 1);
+  const i = Math.floor(k);
+  return i + 1 < a.length ? a[i] + (k - i) * (a[i + 1] - a[i]) : a[i];
+}
+
+const r1 = (v) => Math.round(v * 10) / 10;
+
+/** A range kept inside the joint limits and at least MIN_SPAN wide. */
+export function fixRange({ lo, hi }, key) {
+  const [min, max] = ANGLE_LIMITS[key];
+  if (hi < lo) [lo, hi] = [hi, lo];
+  if (hi - lo < MIN_SPAN) { const c = (lo + hi) / 2; lo = c - MIN_SPAN / 2; hi = c + MIN_SPAN / 2; }
+  if (lo < min) { hi += min - lo; lo = min; }
+  if (hi > max) { lo -= hi - max; hi = max; }
+  return { lo: r1(Math.max(min, lo)), hi: r1(Math.min(max, hi)) };
+}
+
+/**
+ * "Adjust to my movement": the usable range from angles read while the person
+ * moved comfortably. Each end is the 5th / 95th percentile of what was seen.
+ * An angle that hardly moved (< MIN_MOVE) keeps its previous range, so moving
+ * only one arm does not squash the other axis.
+ * Returns { ok, cal, report: { bend, lift: { seen: [lo, hi], moved, kept } }, count, message }.
+ */
+export function estimateRange(samples, previous = DEFAULT_CAL) {
+  const ok = (samples || []).filter((s) => s && Number.isFinite(s.bend) && Number.isFinite(s.lift));
+  if (ok.length < MIN_ADJUST_SAMPLES) {
+    return { ok: false, cal: previous, count: ok.length, report: null, message: `Only ${ok.length} camera readings had both arms in view (at least ${MIN_ADJUST_SAMPLES} are needed). The range was not changed.` };
+  }
+  const report = {};
+  const cal = {};
+  for (const key of ['bend', 'lift']) {
+    const vals = ok.map((s) => s[key]);
+    const lo = percentile(vals, RANGE_PCT[0]);
+    const hi = percentile(vals, RANGE_PCT[1]);
+    const moved = hi - lo;
+    const kept = moved < MIN_MOVE;
+    cal[key] = kept ? { ...previous[key] } : fixRange({ lo, hi }, key);
+    report[key] = { seen: [r1(lo), r1(hi)], moved: r1(moved), kept };
+  }
+  return { ok: true, cal, count: ok.length, report, message: '' };
+}
+
+/** Widen (factor > 1, less sensitive) or narrow (factor < 1, easier to reach the edges) a range around its centre. */
+export function scaleRange(range, factor, key) {
+  const c = (range.lo + range.hi) / 2;
+  const half = ((range.hi - range.lo) / 2) * factor;
+  return fixRange({ lo: c - half, hi: c + half }, key);
+}
+
+/** Moves one end of a range (end = 'lo' | 'hi'), keeping it valid. */
+export function setRangeEnd(range, end, value, key) {
+  const r = { ...range, [end]: Number(value) };
+  if (end === 'lo' && r.lo > r.hi - MIN_SPAN) r.lo = r.hi - MIN_SPAN;
+  if (end === 'hi' && r.hi < r.lo + MIN_SPAN) r.hi = r.lo + MIN_SPAN;
+  return fixRange(r, key);
+}
+
+/** How far 10° of movement moves the marker, in % of the map side. */
+export function percentPer10Deg(range) {
+  return 1000 / (range.hi - range.lo);
+}
+
+/** Is a saved pose inside the current range? (Outside it, its dot is pinned to the edge.) */
+export function poseInRange(angles, cal) {
+  const inside = (v, r) => v >= r.lo - 1e-9 && v <= r.hi + 1e-9;
+  return inside(angles.bend, cal.bend) && inside(angles.lift, cal.lift);
+}
+
 /** Exponential smoothing of the angles (dt in seconds). */
 export function smoothAngles(prev, next, dt, tau = SMOOTH_TAU) {
   if (!prev || !(dt > 0) || dt > 0.5) return { bend: next.bend, lift: next.lift };
@@ -186,7 +277,7 @@ export class RegionTrigger {
 export const PROJECT_KEY = 'poseMap.project.v1';
 
 export function emptyProject() {
-  return { version: 1, anchors: starterAnchors(), cal: JSON.parse(JSON.stringify(DEFAULT_CAL)), clap: { on: false, region: { x: 0.9, y: 0.9, r: 0.16 } }, power: 2 };
+  return { version: 2, anchors: starterAnchors(), takes: [], useStarters: true, cal: JSON.parse(JSON.stringify(DEFAULT_CAL)), clap: { on: false, region: { x: 0.9, y: 0.9, r: 0.16 } }, power: 2 };
 }
 
 export function cleanAnchor(a) {
@@ -199,13 +290,69 @@ export function cleanAnchor(a) {
   const angles = a.angles && Number.isFinite(+a.angles.bend) && Number.isFinite(+a.angles.lift) ? { bend: +a.angles.bend, lift: +a.angles.lift } : null;
   const pos = a.pos && Number.isFinite(+a.pos.x) && Number.isFinite(+a.pos.y) ? { x: clamp01(+a.pos.x), y: clamp01(+a.pos.y) } : null;
   if (!angles && !pos) return null;
+  const source = ['starter', 'recorded', 'vowel-morph'].includes(a.source) ? a.source : 'recorded';
+  const placedBy = ['pose', 'click'].includes(a.placedBy) ? a.placedBy : 'pose';
+  const sm = a.analysis.summary && typeof a.analysis.summary === 'object' ? a.analysis.summary : null;
   return {
     id: String(a.id || `pm-${Math.random().toString(36).slice(2, 10)}`),
     name: String(a.name || 'Sound').slice(0, 40),
-    source: ['starter', 'recorded', 'vowel-morph'].includes(a.source) ? a.source : 'recorded',
+    source,
     pose: a.pose ? String(a.pose).slice(0, 80) : '',
-    pos, angles,
-    analysis: { status: 'ok', f0, amps },
+    // Starters live at a map position; everything a person placed lives at a pose (angles).
+    pos: source === 'starter' || !angles ? pos : null,
+    angles: source === 'starter' && pos ? null : angles,
+    placedBy,
+    recordingId: a.recordingId ? String(a.recordingId) : null,
+    analysis: { status: a.analysis.status === 'warning' ? 'warning' : 'ok', f0, amps, ...(sm ? { summary: JSON.parse(JSON.stringify(sm)) } : {}) },
+  };
+}
+
+// ───────────── drawn takes on the pose map ─────────────
+// A take is drawn with the mouse on the map, but it is stored like every
+// other personal sound: each pointer sample and each learned point is
+// converted to the two angles that reach it with the range in use while
+// drawing. Learned points then follow the range exactly like placed sounds.
+
+/** Converts a Vowel Morph style take (map x/y) to pose angles with `cal`. */
+export function takeToAngles(take, cal) {
+  const A = (p) => { const a = pointToAngles(p, cal); return { bend: r1(a.bend), lift: r1(a.lift) }; };
+  return {
+    ...take,
+    path: take.path.map((p) => ({ ...A(p), t: p.t })),
+    points: take.points.map((p) => ({ ...A(p), t: p.t, f0: p.f0, amps: p.amps, status: p.status })),
+  };
+}
+
+/** Learned points of the visible takes as anchors blendAt() understands, placed through `cal`. */
+export function poseTakeAnchors(takes, cal = DEFAULT_CAL) {
+  const out = [];
+  for (const take of takes || []) {
+    if (take.hidden) continue;
+    take.points.forEach((p, i) => out.push({
+      id: `${take.id}#${i}`, takeId: take.id, name: `${take.name} · ${(p.t / 1000).toFixed(1)} s`,
+      angles: { bend: p.bend, lift: p.lift }, pos: anglesToPoint(p, cal), analysis: { status: 'ok', f0: p.f0, amps: p.amps },
+    }));
+  }
+  return out;
+}
+
+export function cleanPoseTake(t) {
+  if (!t || typeof t !== 'object') return null;
+  const num = (v) => Number.isFinite(+v);
+  const amps = (a) => { const out = new Array(MAX_HARMONICS).fill(0); for (let i = 0; i < MAX_HARMONICS && i < a.length; i++) { const v = Number(a[i]); out[i] = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0; } return out; };
+  const points = (Array.isArray(t.points) ? t.points : []).filter((p) => p && num(p.bend) && num(p.lift) && num(p.f0) && +p.f0 > 0 && Array.isArray(p.amps))
+    .map((p) => ({ bend: +p.bend, lift: +p.lift, t: num(p.t) ? +p.t : 0, f0: +p.f0, amps: amps(p.amps), status: p.status === 'warning' ? 'warning' : 'ok' }));
+  const path = (Array.isArray(t.path) ? t.path : []).filter((p) => p && num(p.bend) && num(p.lift) && num(p.t)).map((p) => ({ bend: +p.bend, lift: +p.lift, t: +p.t }));
+  const s = t.stats || {};
+  return {
+    id: String(t.id || `take-${Math.random().toString(36).slice(2, 10)}`),
+    name: String(t.name || 'Take').slice(0, 40),
+    recordingId: t.recordingId ? String(t.recordingId) : null,
+    createdAt: t.createdAt || new Date().toISOString(),
+    durationSec: num(t.durationSec) ? +t.durationSec : 0,
+    path, points,
+    stats: { snippets: +s.snippets || 0, usable: points.length, silent: +s.silent || 0, unreliable: +s.unreliable || 0, outsidePath: +s.outsidePath || 0 },
+    hidden: t.hidden === true,
   };
 }
 
@@ -213,6 +360,8 @@ export function loadProject(raw) {
   const p = emptyProject();
   if (!raw || typeof raw !== 'object') return p;
   if (Array.isArray(raw.anchors)) p.anchors = raw.anchors.map(cleanAnchor).filter(Boolean);
+  if (Array.isArray(raw.takes)) p.takes = raw.takes.map(cleanPoseTake).filter(Boolean);
+  p.useStarters = raw.useStarters !== false;
   const c = raw.cal || {};
   const rng = (r, d) => (r && Number.isFinite(+r.lo) && Number.isFinite(+r.hi) && +r.hi - +r.lo >= MIN_SPAN - 1e-9 ? { lo: +r.lo, hi: +r.hi } : { ...d });
   p.cal = { bend: rng(c.bend, DEFAULT_CAL.bend), lift: rng(c.lift, DEFAULT_CAL.lift) };
@@ -221,4 +370,13 @@ export function loadProject(raw) {
   p.clap = { on: cl.on === true, region: { x: clamp01(Number.isFinite(+r.x) ? +r.x : 0.9), y: clamp01(Number.isFinite(+r.y) ? +r.y : 0.9), r: Math.min(0.4, Math.max(0.05, Number(r.r) || 0.16)) } };
   p.power = [1, 2, 4].includes(raw.power) ? raw.power : 2;
   return p;
+}
+
+// ───────────── plain-language pose hints ─────────────
+
+/** A pose in words, for "how to play it" hints. */
+export function describePose({ bend, lift }) {
+  const b = bend < 25 ? 'right arm nearly straight' : bend < 65 ? 'right elbow a little bent' : bend < 105 ? 'right elbow bent about halfway' : 'right elbow bent tightly';
+  const l = lift < 30 ? 'left arm down by your side' : lift < 70 ? 'left arm partly raised' : lift < 110 ? 'left arm out to the side' : 'left arm raised high';
+  return `${b} (${Math.round(bend)}°), ${l} (${Math.round(lift)}°)`;
 }
