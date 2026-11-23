@@ -83,3 +83,10 @@ The camera page is now called **Motion Morph** (same `#/pose-map` link; `#/motio
 - Both axes are labelled on the map and in a panel beside it (degrees and x/y), in the same blue/pink as the preview joints, with a mirrored-view note.
 - The tour was rewritten to start from the empty board.
 - `scripts/verify-pose-map.mjs` was rewritten again (66 checks).
+
+**Second follow-up (November 23):**
+- The right elbow bend is measured from the image, with a depth correction for a forearm pointing toward the camera, and the default range is now 10°–100°.
+- Joints outside the picture count as lost, single-frame jumps are held back, and a barely visible joint is flagged as unreliable.
+- Unvoiced fricatives are a new noise sound type: 24-band noise spectra played as filtered white noise, mixed with the harmonics in one synth voice (`pose-sound.js`, `pose-audio.js`).
+- Maps saved by older versions are backed up, then keep their map positions.
+- Browser checks: 82.

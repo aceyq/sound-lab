@@ -58,12 +58,13 @@ await context.addInitScript((vm) => {
     const ch = nb.getChannelData(0); let seed = 7; for (let i = 0; i < ch.length; i++) { seed = (seed * 16807) % 2147483647; ch[i] = seed / 1073741823.5 - 1; }
     const noise = ctx.createBufferSource(); noise.buffer = nb; noise.loop = true;
     const ng = ctx.createGain(); ng.gain.value = 0;
+    const nf = ctx.createBiquadFilter(); nf.type = 'allpass';
     const mix = ctx.createGain();
-    osc.connect(g).connect(mix); noise.connect(ng).connect(mix);
+    osc.connect(g).connect(mix); noise.connect(nf).connect(ng).connect(mix);
     osc.start(); noise.start();
     const waves = {};
     for (const [k, a] of Object.entries(RECIPES)) waves[k] = ctx.createPeriodicWave(new Float32Array(a.length), Float32Array.from(a));
-    voice = { ctx, osc, g, ng, mix, waves, log: [] };
+    voice = { ctx, osc, g, ng, nf, mix, waves, log: [] };
     return voice;
   };
   window.__fakeVoice = {
@@ -74,7 +75,14 @@ await context.addInitScript((vm) => {
       if (freq > 0) { v.osc.frequency.setValueAtTime(freq, now); v.osc.setPeriodicWave(v.waves[recipe]); v.g.gain.setValueAtTime(0.25, now); } else v.g.gain.setValueAtTime(0, now);
       v.log.push({ ms: performance.now(), freq });
     },
-    noise() { const v = voice || make(); const now = v.ctx.currentTime; v.g.gain.setValueAtTime(0, now); v.ng.gain.setValueAtTime(0.3, now); v.log.push({ ms: performance.now(), freq: -1 }); },
+    // shape: 'white' | 'sss' (high-passed hiss, like s/sh) | 'rumble' (low-passed, like breath or a fan)
+    noise(shape = 'white') {
+      const v = voice || make(); const now = v.ctx.currentTime;
+      v.nf.type = shape === 'sss' ? 'highpass' : shape === 'rumble' ? 'lowpass' : 'allpass';
+      v.nf.frequency.value = shape === 'sss' ? 4000 : shape === 'rumble' ? 300 : 1000;
+      v.nf.Q.value = 0.7;
+      v.g.gain.setValueAtTime(0, now); v.ng.gain.setValueAtTime(shape === 'rumble' ? 0.6 : 0.3, now); v.log.push({ ms: performance.now(), freq: -1 });
+    },
     log: () => (voice ? voice.log : []),
   };
   const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
@@ -86,12 +94,13 @@ await context.addInitScript((vm) => {
     return dest.stream;
   };
   // Stick figure: right elbow bend and left arm lift in degrees; `hide` = landmark index to lose.
-  window.__body = ({ bend = 0, lift = 15, hide = null } = {}) => {
+  // short: visible forearm length ÷ real length (forearm pointing toward the camera); wristY: force the wrist's y (e.g. below the picture); vis: visibility of the right wrist
+  window.__body = ({ bend = 0, lift = 15, hide = null, short = 1, wristY = null, vis = 0.99 } = {}) => {
     const D = Math.PI / 180;
     const lms = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, z: 0, visibility: 0.99 }));
     const set = (i, x, y) => { lms[i] = { x, y, z: 0, visibility: 0.99 }; };
     set(12, 0.40, 0.35); set(11, 0.60, 0.35); set(24, 0.42, 0.70); set(23, 0.58, 0.70);
-    set(14, 0.40, 0.50); set(16, 0.40 + 0.15 * Math.sin(bend * D), 0.50 + 0.15 * Math.cos(bend * D));
+    set(14, 0.40, 0.50); set(16, 0.40 + 0.15 * short * Math.sin(bend * D), wristY != null ? wristY : 0.50 + 0.15 * short * Math.cos(bend * D)); lms[16].visibility = vis;
     const a = Math.atan2(0.35, -0.02) - lift * D;
     set(13, 0.60 + 0.15 * Math.cos(a), 0.35 + 0.15 * Math.sin(a)); set(15, 0.60 + 0.3 * Math.cos(a), 0.35 + 0.3 * Math.sin(a));
     set(0, 0.5, 0.2);
@@ -115,7 +124,7 @@ let dialogAnswer = true;
 page.on('dialog', (dl) => { dialogs.push(dl.message()); return dialogAnswer ? dl.accept() : dl.dismiss(); });
 const dbg = () => page.evaluate(() => window.__poseMap.debug());
 const wait = (ms) => page.waitForTimeout(ms);
-const pose = (p) => page.evaluate((q) => { window.__pose = { bend: 15, lift: 15, hide: null, ...q }; }, p);
+const pose = (p) => page.evaluate((q) => { window.__pose = { bend: 10, lift: 15, hide: null, ...q }; }, p);
 const notBusy = (ms = 10000) => page.waitForFunction(() => !window.__poseMap.debug().busy, null, { timeout: ms });
 const f = (x) => x.blend.params.f0;
 const topGroup = (x) => x.groups[0] || { name: '', weight: 0 };
@@ -130,7 +139,7 @@ const clickMap = async (x, y) => { box = await mapBox(); await page.mouse.click(
 const sound = (x, name) => x.project.sounds.find((s) => s.name === name);
 const record = async (name, voice) => {
   if (name) await page.getByLabel('Name of your sound').fill(name);
-  await page.evaluate(([fq, r]) => (fq === 'noise' ? window.__fakeVoice.noise() : window.__fakeVoice.set(fq, r)), voice);
+  await page.evaluate(([fq, r]) => (fq === 'noise' ? window.__fakeVoice.noise(r) : window.__fakeVoice.set(fq, r)), voice);
   await page.locator('.pm-add .pm-rec').click();
   await page.waitForFunction(() => { const x = window.__poseMap.debug(); return !x.busy && x.flow && (x.flow.step !== 'record' || x.flow.ok === false); }, null, { timeout: 15000 });
   await page.evaluate(() => window.__fakeVoice.set(0));
@@ -144,7 +153,7 @@ let d = await dbg();
 const emptyText = await page.locator('.pm-empty').textContent();
 check('Page opens as “Motion Morph” with an EMPTY map (no starter vowels)', (await page.locator('h1').textContent()) === 'Motion Morph' && d.project.sounds.length === 0 && d.project.takes.length === 0 && d.onMap.length === 0 && d.blend.weights.length === 0);
 check('The empty map shows an instruction and explains what “learning” means', d.emptyShown && /Your map is empty/.test(emptyText) && /Add a sound/.test(emptyText) && /nothing is trained/.test(emptyText) && /48 harmonics/.test(emptyText), emptyText.slice(0, 140) + '…');
-check("Default range is in place without any calibration", d.project.calSource === 'default' && d.project.cal.bend.lo === 15 && d.project.cal.bend.hi === 130, JSON.stringify(d.project.cal));
+check("Default range is in place without any calibration (right elbow 10°–100°: relaxed arm to a right angle)", d.project.calSource === 'default' && d.project.cal.bend.lo === 10 && d.project.cal.bend.hi === 100, JSON.stringify(d.project.cal));
 
 // ── 2. axis labels ──
 const svgText = await page.locator('svg.pm-square .pm-axes').textContent();
@@ -178,14 +187,44 @@ const agree = [base, bendOnly, liftOnly, both].every((x) => Math.abs(shownDeg(x.
   && Math.abs(x.dot.x - Math.min(1, Math.max(0, expX(x.angles.bend)))) < 0.01 && Math.abs(x.dot.y - Math.min(1, Math.max(0, expY(x.angles.lift)))) < 0.01);
 check('Degrees and map coordinates shown beside the map agree with the measured angles and the marker', agree, [base, both].map((x) => x.shown.axis.join(' | ')).join('  ;  '));
 
+// ── 3b. right elbow measurement: depth correction, comfortable reach, lost and unreliable joints ──
+await pose({ bend: 0, lift: 50 }); await wait(700); // straight arm: lets the page learn this arm's forearm/upper-arm ratio
+const straight = await dbg();
+await pose({ bend: 0, lift: 50, short: 0.5 }); await wait(700); // forearm toward the camera: half as long in the picture
+const toward = await dbg();
+check('Forearm pointing toward the camera: the picture shows 0°, the depth-corrected reading is ≈60° and moves the marker', Math.abs(toward.imageBend) < 1 && Math.abs(toward.angles.bend - 60) < 3 && toward.dot.x > 0.5 && /depth correction/.test(toward.shownBendNote) && Math.abs(straight.angles.bend) < 3,
+  `straight ${straight.angles.bend.toFixed(1)}°; toward camera: picture ${toward.imageBend.toFixed(1)}°, used ${toward.angles.bend.toFixed(1)}° → x ${toward.dot.x.toFixed(2)} (forearm ratio ${toward.foreRatio.toFixed(2)})`);
+await pose({ bend: 0, lift: 50, short: 0.02 }); await wait(700);
+const atCam = await dbg();
+await pose({ bend: 90, lift: 50 }); await wait(700);
+const rightAngle = await dbg();
+check('A comfortable right-angle bend reaches the right side of the map (in the picture plane or toward the camera)', rightAngle.dot.x > 0.85 && atCam.dot.x > 0.85, `90° bend → x ${rightAngle.dot.x.toFixed(2)}; forearm at the camera → ${atCam.angles.bend.toFixed(0)}° → x ${atCam.dot.x.toFixed(2)}`);
+await pose({ bend: 40, lift: 50, wristY: 1.15 }); await wait(700);
+d = await dbg();
+check('A wrist outside the picture is LOST (not guessed): marker stays, sound gate closes, joint named', !d.tracking && /right wrist/.test(d.lostText) && Math.abs(d.dot.x - rightAngle.dot.x) < 0.01 && /stays where it was/.test(d.shownTrack), d.shownTrack);
+await pose({ bend: 40, lift: 50, vis: 0.6 }); await wait(700);
+d = await dbg();
+check('A barely visible wrist is flagged as unreliable while it is still used', d.tracking && d.weak.includes('right wrist') && /Unreliable/.test(d.shownTrack), d.shownTrack);
+await pose({ bend: 40, lift: 50 }); await wait(500);
+await page.evaluate(() => { window.__feedOn = false; });
+const feed1 = (q) => page.evaluate((x) => window.__poseMap.feed({ landmarks: window.__body(x), world: null, width: 480, height: 480, t: performance.now() }), q);
+await feed1({ bend: 40, lift: 50 }); await wait(40);
+const heldBefore = (await dbg()).held;
+await feed1({ bend: 160, lift: 50 }); await wait(40);
+const glitch = await dbg();
+await feed1({ bend: 41, lift: 50 }); await wait(40);
+check('A single-frame glitch of more than 60° is ignored (the marker does not jump)', glitch.held === heldBefore + 1 && glitch.angles.bend < 45, `held frames ${heldBefore} → ${glitch.held}, bend stayed ${glitch.angles.bend.toFixed(1)}°`);
+await page.evaluate(() => { window.__feedOn = true; });
+await pose(P0); await wait(500);
+
 // ── 4. Add a sound: failure → retry → listen → click placement (with cancel) → ready ──
 await page.locator('.pm-add-btn').click();
 d = await dbg();
 check('Add a sound opens the guided panel at step 1 (Record) with a step indicator', d.flow && d.flow.step === 'record' && (await page.locator('.pm-flow-steps li').count()) === 4 && /Record/.test(await flowStep()), await page.locator('.pm-flow-steps').textContent());
-await record('ah', ['noise']);
+await record('ah', ['noise', 'rumble']);
 d = await dbg();
 const failText = await page.locator('.pm-fail').textContent().catch(() => '');
-check('A recording with no pitch (noise) is explained right there, with “Try again”, and nothing is saved', d.flow.step === 'record' && d.flow.ok === false && /couldn’t be analyzed/.test(failText) && /pitch/.test(failText) && (await page.locator('.pm-add .pm-rec').textContent()).includes('Try again') && d.project.sounds.length === 0, failText.slice(0, 160));
+check('A low rumble (no pitch, not a fricative) is explained right there, with “Try again”, and nothing is saved', d.flow.step === 'record' && d.flow.ok === false && /couldn’t be analyzed/.test(failText) && /not a fricative/.test(failText) && (await page.locator('.pm-add .pm-rec').textContent()).includes('Try again') && d.project.sounds.length === 0, failText.slice(0, 200));
 await record(null, [196, 'ah']);
 d = await dbg();
 check('Try again with a steady sung “ah” (simulated 196 Hz) moves on to step 2 (Listen)', d.flow.step === 'listen' && /Listen/.test(await flowStep()) && d.project.sounds.length === 1 && sound(d, 'ah').place === null && Math.abs(sound(d, 'ah').analysis.f0 - 196) < 2, `f0 ${sound(d, 'ah').analysis.f0} Hz; in the library, not on the map yet`);
@@ -222,7 +261,7 @@ check('Clicking places it: labelled dot on the map, step 4 (Ready) says it is re
 await page.locator('.pm-add .pm-add-another').click();
 await record('ee', [300, 'ee']);
 await page.locator('.pm-add .pm-to-place').click();
-const EE = { bend: 0.9 * 115 + 15, lift: 0.5 * 105 + 15 }; // right edge, same height as "ah"
+const EE = { bend: 0.9 * 90 + 10, lift: 0.5 * 105 + 15 }; // right edge, same height as "ah"
 await pose(EE);
 await page.locator('.pm-add .pm-pose-btn').click();
 await wait(400);
@@ -284,6 +323,59 @@ await clickMap(0.1, 0.8);
 d = await dbg();
 check('The same sound moves to the new spot (no duplicate)', d.project.sounds.filter((s) => s.name === 'ah').length === 1 && Math.abs(d.onMap.find((a) => a.name === 'ah').pos.y - 0.8) < 0.01);
 await page.locator('.pm-add button', { hasText: 'Done' }).click();
+
+// ── 6b. fricative: analyzed as noise, one synth blends harmonics + noise ──
+await page.locator('.pm-add-btn').click();
+await record('sss', ['noise', 'sss']);
+d = await dbg();
+const heardS = await page.locator('.pm-heard').textContent();
+const sss = sound(d, 'sss');
+check('A steady “sss” (simulated high-passed hiss) is kept as a NOISE sound: no f0, a noise spectrum', d.flow.step === 'listen' && sss && sss.analysis.kind === 'noise' && sss.analysis.f0 === null && sss.analysis.noise.bands.length === 24 && /no pitch/.test(heardS) && /white noise shaped by 24 band filters/.test(heardS) && await page.locator('.pm-draft-noise').count() === 1,
+  `centre ${sss && sss.analysis.summary.centroidHz} Hz, strongest band ${sss && sss.analysis.summary.strongestBand}`);
+await page.locator('.pm-add .pm-synth').click(); await wait(250);
+d = await dbg();
+check('▶ Synthesized plays the noise part only (harmonic gain 0)', d.audio.kind === 'synth' && !!d.audio.parts && d.audio.parts.harm === 0 && d.audio.parts.noise === 1, JSON.stringify(d.audio.parts));
+await wait(1700);
+await page.locator('.pm-add .pm-to-place').click();
+await page.locator('.pm-add .pm-click-btn').click();
+await clickMap(0.1, 0.2);
+await page.locator('.pm-add button', { hasText: 'Done' }).click();
+d = await dbg();
+const AHp = sound(d, 'ah').place.angles;
+const SSp = sound(d, 'sss').place.angles;
+await page.getByRole('button', { name: /Start sound/ }).click();
+await pose(SSp); await wait(700);
+const atS = await dbg();
+await pose({ bend: AHp.bend, lift: (AHp.lift + SSp.lift) / 2 }); await wait(700);
+const midS = await dbg();
+await pose(AHp); await wait(700);
+const atA = await dbg();
+check('At the “sss” pose: noise only, no pitch shown or played (pitched part under 1 %)', atS.blend.params.harm < 0.01 && atS.audio.parts.harm < 0.1 && /no pitch \(noise only\)/.test(atS.shown.f0) && atS.noiseShown, `${atS.shown.f0}; parts ${JSON.stringify(atS.audio.parts)}`);
+const wAh = midS.blend.weights.find((w) => w.name === 'ah').weight;
+const wEe = midS.blend.weights.find((w) => w.name === 'ee').weight;
+const wS = midS.blend.weights.find((w) => w.name === 'sss').weight;
+const expF0 = (wAh * 196 + wEe * 300) / (wAh + wEe);
+check('Half-way between “ah” and “sss”: ONE synth mixes the harmonic and noise parts by the shown shares; f0 comes from the pitched sounds only', Math.abs(midS.blend.params.f0 - expF0) < 0.5 && Math.abs(midS.blend.params.noise - wS) < 1e-9 && Math.abs(midS.blend.params.harm - (wAh + wEe)) < 1e-9 && Math.abs(midS.audio.params.noise - midS.blend.params.noise) < 1e-9 && Math.abs(midS.audio.parts.harm ** 2 + midS.audio.parts.noise ** 2 - 1) < 1e-9 && /pitched part/.test(midS.shownMix) && /noise part/.test(midS.shownMix),
+  `ah ${(wAh * 100).toFixed(0)} %, sss ${(wS * 100).toFixed(0)} %, ee ${(wEe * 100).toFixed(0)} % → f0 ${midS.blend.params.f0.toFixed(1)} Hz (expected ${expF0.toFixed(1)}), noise share ${(midS.blend.params.noise * 100).toFixed(0)} %; ${midS.shownMix}`);
+check('Percentages add up to 100 % and are the synth’s own weights', Math.abs(midS.groups.reduce((a, g) => a + g.weight, 0) - 1) < 1e-9 && midS.groups.some((g) => g.name === 'sss (noise)'), midS.groups.map((g) => `${g.name} ${(g.weight * 100).toFixed(0)} %`).join(', '));
+check('At the “ah” pose: pitched part only (196 Hz, noise part under 1 %)', near(f(atA), 196, 5) && atA.blend.params.noise < 0.01 && atA.audio.parts.noise < 0.1 && !atA.noiseShown, `noise share ${(atA.blend.params.noise * 100).toFixed(2)} %`);
+check('Never two recordings at once: moving keeps one synth voice and starts no original playback', [atS, midS, atA].every((x) => x.audio.kind === 'synth') && atA.audio.counters.originalsStarted === atS.audio.counters.originalsStarted && atA.audio.counters.voicesCreated === atS.audio.counters.voicesCreated);
+await page.screenshot({ path: shots + 'motion-02b-fricative.png' });
+await page.getByRole('button', { name: /Stop sound/ }).click();
+// a fricative that was saved earlier as a pitched sound is flagged on load
+await page.evaluate(() => { const p = JSON.parse(localStorage.getItem('poseMap.project.v1')); const s = p.sounds.find((x) => x.name === 'sss'); s.analysis = { kind: 'pitched', status: 'ok', f0: 310, amps: [1, 0.5, 0.2] }; localStorage.setItem('poseMap.project.v1', JSON.stringify(p)); });
+await page.reload();
+await page.waitForFunction(() => window.__poseMap && window.__poseMap.debug().recheck.length > 0, null, { timeout: 8000 }).catch(() => {});
+await page.evaluate(() => { window.__feedOn = true; });
+d = await dbg();
+const flagText = await page.locator('.pm-flag').first().textContent().catch(() => '');
+check('A fricative saved earlier as a pitched sound is flagged after loading, with “Analyze again”', d.recheck.length === 1 && d.recheck[0].id === sound(d, 'sss').id && /unvoiced fricative/.test(flagText) && await page.locator('.pm-reanalyze').count() === 1, flagText);
+await page.locator('.pm-reanalyze').click();
+d = await dbg();
+check('“Analyze again” turns it back into a noise sound and clears the flag', sound(d, 'sss').analysis.kind === 'noise' && d.recheck.length === 0);
+dialogs = [];
+await page.locator(`.pm-row[data-id="${sound(d, 'sss').id}"] .pm-del-rec`).click();
+d = await dbg();
 
 // ── 7. Draw + record ──
 await page.getByRole('button', { name: /Draw \+ record/ }).click();
@@ -413,8 +505,38 @@ d = await dbg();
 check('After reload: recordings, placements, take and range are kept', JSON.stringify(d.project) === keep && d.onMap.length === 2);
 check('After reload: ▶ Original is still available (audio stored in this browser)', await page.locator('.pm-row[data-id] button', { hasText: 'Original' }).count() >= 1);
 
+// ── 9b. a map saved by the previous version (old range, old elbow measurement) ──
+const v4 = await page.evaluate(() => localStorage.getItem('poseMap.project.v1'));
+const OLD = { bend: { lo: 15, hi: 130 }, lift: { lo: 15, hi: 120 } };
+await page.evaluate(([raw, old]) => {
+  const p = JSON.parse(raw);
+  const toPt = (a, c) => ({ x: (a.bend - c.bend.lo) / (c.bend.hi - c.bend.lo), y: (a.lift - c.lift.lo) / (c.lift.hi - c.lift.lo) });
+  const toAng = (q, c) => ({ bend: c.bend.lo + q.x * (c.bend.hi - c.bend.lo), lift: c.lift.lo + q.y * (c.lift.hi - c.lift.lo) });
+  for (const s of p.sounds) if (s.place) s.place.angles = toAng(toPt(s.place.angles, p.cal), old);
+  for (const t of p.takes) { t.points = t.points.map((q) => ({ ...q, ...toAng(toPt(q, p.cal), old) })); t.path = t.path.map((q) => ({ ...q, ...toAng(toPt(q, p.cal), old) })); }
+  p.version = 3; p.cal = old; delete p.migratedFrom;
+  localStorage.setItem('poseMap.project.v1', JSON.stringify(p));
+  localStorage.removeItem('poseMap.project.backup-before-v4');
+}, [v4, OLD]);
+const v3dots = JSON.parse(v4);
+await page.reload();
+await page.waitForFunction(() => window.__poseMap);
+await page.evaluate(() => { window.__feedOn = true; });
+d = await dbg();
+const backup = await page.evaluate(() => JSON.parse(localStorage.getItem('poseMap.project.backup-before-v4') || 'null'));
+const v4dots = loadDots(v3dots);
+function loadDots(p) { return p.sounds.filter((x) => x.place).map((x) => ({ name: x.name, x: (x.place.angles.bend - p.cal.bend.lo) / (p.cal.bend.hi - p.cal.bend.lo), y: (x.place.angles.lift - p.cal.lift.lo) / (p.cal.lift.hi - p.cal.lift.lo) })); }
+const same = v4dots.every((q) => { const n = d.onMap.find((a) => a.name === q.name); return n && Math.abs(n.pos.x - q.x) < 0.003 && Math.abs(n.pos.y - q.y) < 0.003; });
+check('A map saved by the previous version is backed up, then updated with every dot left where it was', backup && backup.version === 3 && d.project.version === 4 && same && d.project.cal.bend.hi === 100 && /stay exactly where they were/.test(d.rangeMsg) && d.project.sounds.length === JSON.parse(v4).sounds.length,
+  d.onMap.map((a) => `${a.name} (${a.pos.x.toFixed(2)}, ${a.pos.y.toFixed(2)})`).join(', '));
+await page.reload();
+await page.waitForFunction(() => window.__poseMap);
+await page.evaluate(() => { window.__feedOn = true; });
+d = await dbg();
+check('The update runs only once (reloading again changes nothing)', d.project.version === 4 && !/stay exactly where they were/.test(d.rangeMsg) && v4dots.every((q) => { const n = d.onMap.find((a) => a.name === q.name); return n && Math.abs(n.pos.x - q.x) < 0.003; }));
+
 // ── 10. tour ──
-const before = JSON.stringify(d.project);
+const before = JSON.stringify((await dbg()).project);
 await page.getByRole('button', { name: '🧭 Tour' }).click();
 await wait(300);
 const steps = [];

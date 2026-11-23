@@ -3108,6 +3108,88 @@ What Claude tested, all with simulated input (generated body landmarks fed throu
   - The real pose model loads on Chromium's fake camera and tracks nothing.
   - Vowel Morph, Motion Score and Frequency Playground still open.
 
+### Motion Morph follow-up: right elbow control, one blended sound, fricatives
+
+Prompt (verbatim, sent November 23, 2026 UTC). ChatGPT helped me draft it:
+
+<details>
+<summary>Full prompt</summary>
+
+```text
+I like this version a lot, so please keep building on it. There are a few things I need fixed before I can demonstrate it.
+1. Fix how my right arm controls the dot.
+After removing the calibration step, bending my right arm barely moves the dot toward the sounds, even when I bend it a lot. Please investigate the actual cause, including the angle measurement, movement range, smoothing, and how the angle maps onto the horizontal axis.
+The right elbow bend should use my shoulder, elbow, and wrist. Keep the left arm controlling the vertical axis, and make sure the labels match what actually happens.
+I don’t want to bring back a long calibration process. Use sensible default ranges so ordinary, comfortable movements can reach the map. If needed, offer a quick, optional adjustment to my range.
+Please show:
+
+* My measured right elbow angle in degrees.
+* Where that angle puts the dot on the horizontal axis.
+* A clear indication if my arm isn’t visible or tracking is unreliable.
+
+Make sure anatomical left and right stay correct with the mirrored camera preview. Don’t let a missing wrist or elbow silently send the dot somewhere random. Explain what was causing the problem and what you changed.
+2. Check that the map actually blends the sound parameters.
+When I move between two recorded sounds, I want one synthesized sound that changes between them. I don’t want the app to play both recordings at the same time.
+For vowels and other pitched sounds, check that the app blends the fundamental frequency and corresponding harmonic amplitudes, then uses those blended values to synthesize the output. Keep original-recording playback as a separate preview.
+Keep the colored contribution bars and percentages visible as I move. They should add up to 100% and reflect the weights actually used by the audio engine. The fundamental frequency and harmonic graph should also match what I’m hearing.
+3. Handle fricatives properly.
+I tried recording a fricative on the map too. Please check what currently happens rather than assuming it works like a vowel.
+Sounds like “shh,” “sss,” and “fff” are mostly noise, so forcing them through the pitched-vowel analysis won’t reconstruct them properly. If the map supports these sounds, it needs to represent their noise spectrum or filter shape and synthesize them using a noise source.
+For a blend between a vowel and a fricative, blend the relevant pitched and noise parameters into one synthesis system. A combination of harmonics and noise can be appropriate here, but that’s different from playing two original recordings together. Don’t invent a fundamental frequency for an unvoiced fricative.
+If reliable fricative reconstruction isn’t supported yet, tell me clearly in the interface and explain the limitation. Don’t label a failed analysis as successfully learned. Also check the fricative I already recorded and flag it if it needs to be recorded or analyzed again.
+4. Verify the behavior and update the walkthrough.
+Please test the arm-angle mapping, whether comfortable movements can reach the map, the contribution percentages, and the audio interpolation. Include checks for pitched sounds, unvoiced fricatives, and transitions between them if supported. Separate simulated checks from anything that still needs me to try my camera or listen.
+Update the tutorial if any controls change. Keep the explanation straightforward: what each arm changes, how I move toward a recorded sound, and what happens between sounds.
+Add this exact prompt to `AI_USE.md` as a follow-up, noting that ChatGPT helped me draft it. Briefly document the changes and actual testing results in the same simple style as the rest of the file.
+Then commit and push the relevant changes, check the deployment, and send me the commit and live app links. Please preserve my saved recordings and maps, and explain any compatibility issues before changing their saved format.
+```
+
+</details>
+
+What was causing the right arm problem (Claude's analysis; it could not see my camera, so this comes from the code and simulated poses):
+- **The range was too wide.** The default range ran from 15° to 130° of elbow bend, so reaching the right edge needed an almost complete curl. A comfortable right-angle bend (about 90°) only reached about two thirds of the way across.
+- **Bending toward the camera was barely measured.** Facing a laptop, people usually bend the elbow forward, so the forearm points toward the camera. In the picture the forearm then just looks shorter, and its direction says little about the bend. The bend was taken from MediaPipe's 3D "world" landmarks, whose depth is only a rough estimate, so a large forward bend could read as a small angle.
+- **Smoothing and the mapping were not the cause.** Smoothing is a 0.08 s filter and the mapping is a straight line from the range to the map.
+
+What changed:
+- **Right elbow measurement.** The bend still comes from my right shoulder, elbow and wrist. It is now measured in the camera picture, with a depth correction: when the forearm looks shorter than it really is, the missing length is treated as pointing toward the camera.
+  - A forearm pointing straight at the camera now reads about 90° instead of a random small angle.
+  - The real forearm length is learned from a few seconds of my own straight arm.
+  - The left arm lift, which drives the vertical axis, is measured as before.
+- **New default range.** The right elbow range is now 10° to 100°, from a relaxed arm to a right angle. A comfortable 90° bend reaches about 90 % of the way across. Calibration stays optional ("Adjust to my movement").
+- **Readings beside the map.** The panel shows the measured elbow angle in degrees and the x it gives. When the depth correction is in use, it also shows the picture angle next to the corrected one.
+- **Lost and unreliable joints.** A joint counts as lost when it is hard to see or outside the picture; MediaPipe still guesses a position there, which used to be accepted. When a joint is lost, the marker stays where it was, the sound fades and the joint is named. A barely visible joint is shown as "unreliable". A one-frame jump of more than 60° is ignored unless the next frame agrees.
+- **One synthesized sound, checked.** Moving between two recordings never plays both recordings. The app blends the fundamental and the 48 harmonic strengths and plays one synthesized tone. ▶ Original stays a separate preview. The coloured percentages are the weights the synthesizer uses and add up to 100 %. The f0 and harmonic graph show the synthesizer's own settings while sound is on.
+- **Fricatives.** A recording with no pitch is no longer forced through the vowel analysis. If it is clearly audible and most of its energy is above 2 kHz, it is kept as a noise sound: no f0, just its noise spectrum in 24 frequency bands.
+  - **How it is played.** The synthesizer plays it as white noise through 24 band filters.
+  - **Between a vowel and a fricative.** One sound mixes the vowel's harmonics and the noise, with the pitch taken only from the pitched sounds; no pitch is invented for the fricative. A line under "What you hear" shows the two parts' shares, and a second graph shows the noise bands.
+  - **What is still rejected.** A low rumble (breath or room noise), a mix of pitch and hiss, and voiced fricatives like "zzz" are rejected with an explanation.
+  - **Drawn takes.** Takes still skip unpitched snippets, and the status now says so and points to 🎤 Add a sound.
+- **Saved maps.** When an older saved map loads, the app keeps a backup copy in the browser first. Then every sound and take stays exactly where it was on the map, with its pose re-derived for the new measurement and range, and a note in the range card explains this. Recordings are untouched. I chose this option when Claude asked.
+- **Earlier fricative recordings.** After loading, every saved recording is analyzed again with the current analysis. A sound that now analyzes differently is flagged with "↻ Analyze again", for example a fricative saved as a pitched sound. So is one that no longer passes at all.
+- **Tour.** It explains the new elbow range, what happens when a joint is lost, fricatives, and the one-synth mix.
+
+What Claude tested, all simulated (generated body landmarks through the page's own pose handler, a synthetic microphone with pitched tones and filtered noise, Playwright's mouse). 194 unit tests and the build pass. The browser script passed 82 of 82 checks:
+- **Arm measurement.**
+  - Bending only the elbow moved the marker only sideways, lifting only the left arm moved it only up, and the degrees and x/y shown beside the map matched the marker.
+  - A forearm pointing toward the camera, half as long in the picture, read 0° in the picture and about 60° with the correction, and it moved the marker.
+  - A 90° bend, in the picture plane or straight at the camera, reached x > 0.85.
+- **Bad tracking.** A wrist outside the picture counted as lost: the marker stayed put, the sound faded and the wrist was named. A barely visible wrist was flagged "unreliable". A one-frame 120° glitch was ignored.
+- **Pitched sounds.** "ah" (196 Hz) and "ee" (300 Hz) played exactly at their poses. Halfway between them the app played one 50/50 blended tone, the percentages added to 100 %, and the shown f0 and harmonics equalled what the synthesizer played.
+- **Fricatives.**
+  - A simulated "sss" (high-passed noise) was kept as a noise sound with no f0, and its preview played only the noise part. A low rumble was rejected as "not a fricative".
+  - At the "sss" pose, the app showed and played no pitch. Halfway between "ah" and "sss", one voice mixed the two parts by the shown shares, with f0 taken from the pitched sounds only and an equal-power mix. At "ah" there was no noise part. No original recording started while moving.
+  - A fricative deliberately saved as a pitched sound was flagged after reloading, and "Analyze again" fixed it.
+- **Older maps.** A map in the previous format was backed up and loaded with every dot in the same place and the new range. Reloading again did not change it a second time.
+- **Everything from before still passed.** That covers the empty map, the guided Add a sound, Clear map, drawn takes, the range adjust, reload, the tour, phone width and the real pose model on Chromium's fake camera.
+
+What still needs me with a real camera and microphone:
+- Does a comfortable bend now reach my sounds, both with the forearm toward the laptop and with it to the side?
+- Does the "unreliable" note show up when my wrist is near the edge of the picture?
+- How do a real "sss", "shh" and "fff" get classified?
+- Does the vowel-to-fricative mix sound like one sound?
+- Are any of my earlier recordings flagged after loading?
+
 ### My own testing
 
 To confirm: recording and drawing with my own voice and microphone, listening to the blends, and trying the pose map (right elbow bend and left arm lift) with my own body in front of my laptop camera. For Motion Morph, also: starting from the empty map, recording "ah" and "ee" and placing one by clicking and one by pose, checking that bending only my right elbow moves the marker sideways and lifting only my left arm moves it up (with the mirrored preview), using Clear map and placing a recording again, recording a hum and a vowel, holding a pose after the countdown from a few steps back, drawing a take while singing ah → ee → oo, playing everything with my arms, and running "Adjust to my movement" and checking that my saved poses still play the same sounds.

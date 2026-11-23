@@ -151,11 +151,11 @@ test('a lost joint is named and its angle is not used', () => {
   assert.equal(none.noPerson, true);
 });
 
-test('world landmarks (metres) are preferred when present', () => {
+test('elbow bend is measured from the picture; world landmarks are used for the arm lift only', () => {
   const lms = body({ bend: 30, lift: 30 });
   const world = body({ bend: 80, lift: 120 }).map((p) => ({ x: p.x, y: p.y, z: 0 }));
   const r = poseAngles(lms, { world, aspect: 1 });
-  assert.ok(Math.abs(r.bend - 80) < 0.01 && Math.abs(r.lift - 120) < 0.01);
+  assert.ok(Math.abs(r.bend - 30) < 0.01 && Math.abs(r.lift - 120) < 0.01, `${r.bend} ${r.lift}`);
 });
 
 test('calibration from the two held poses maps them to opposite corners', () => {
@@ -172,22 +172,22 @@ test('calibration from the two held poses maps them to opposite corners', () => 
 test('both angles together set the blend; a held pose gives a steady sound', () => {
   const anchors = starterAnchors().map((a) => ({ ...a, pos: anchorPoint(a, DEFAULT_CAL) }));
   const f0 = (bend, lift) => blendAt(anchors, anglesToPoint({ bend, lift })).params.f0;
-  const ah = f0(DEFAULT_CAL.bend.lo + 0.1 * 115, DEFAULT_CAL.lift.lo + 0.1 * 105);
+  const ah = f0(DEFAULT_CAL.bend.lo + 0.1 * (DEFAULT_CAL.bend.hi - DEFAULT_CAL.bend.lo), DEFAULT_CAL.lift.lo + 0.1 * (DEFAULT_CAL.lift.hi - DEFAULT_CAL.lift.lo));
   assert.ok(Math.abs(ah - 196) < 1e-9); // exactly on the "ah" starter
-  const mid = f0(70, 60);
-  assert.notEqual(f0(90, 60), mid);
-  assert.notEqual(f0(70, 80), mid);
-  assert.notEqual(f0(90, 80), f0(90, 60));
-  assert.notEqual(f0(90, 80), f0(70, 80));
-  let s = { bend: 70, lift: 60 };
-  for (let i = 0; i < 100; i++) s = smoothAngles(s, { bend: 70, lift: 60 }, 0.02);
+  const mid = f0(50, 60);
+  assert.notEqual(f0(80, 60), mid);
+  assert.notEqual(f0(50, 80), mid);
+  assert.notEqual(f0(80, 80), f0(80, 60));
+  assert.notEqual(f0(80, 80), f0(50, 80));
+  let s = { bend: 50, lift: 60 };
+  for (let i = 0; i < 100; i++) s = smoothAngles(s, { bend: 50, lift: 60 }, 0.02);
   assert.equal(f0(s.bend, s.lift), mid);
 });
 
 test('taught poses follow their angles through a new calibration', () => {
-  const a = { angles: { bend: 72.5, lift: 67.5 }, pos: null };
+  const a = { angles: { bend: (DEFAULT_CAL.bend.lo + DEFAULT_CAL.bend.hi) / 2, lift: (DEFAULT_CAL.lift.lo + DEFAULT_CAL.lift.hi) / 2 }, pos: null };
   assert.deepEqual(anchorPoint(a, DEFAULT_CAL), { x: 0.5, y: 0.5 });
-  const cal = { bend: { lo: 50, hi: 95 }, lift: { lo: 45, hi: 90 } };
+  const cal = { bend: { lo: a.angles.bend - 20, hi: a.angles.bend + 20 }, lift: { lo: 45, hi: 90 } };
   assert.deepEqual(anchorPoint(a, cal), { x: 0.5, y: 0.5 });
 });
 

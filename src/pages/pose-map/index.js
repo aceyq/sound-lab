@@ -6,8 +6,10 @@
 //          horizontal x = RIGHT elbow bend  (shoulder–elbow–wrist; left end = straighter, right end = more bent)
 //          vertical   y = LEFT arm lift     (hip–shoulder–elbow;   bottom = arm down, top = arm raised)
 //     ─▶ scaled by the movement range to 0…1
-//     ─▶ Vowel Morph's inverse-distance blend of the sounds placed on the map (blendAt)
-//     ─▶ ONE harmonic voice (Vowel Morph's MorphAudio, 48 sine oscillators)
+//     ─▶ inverse-distance weights of the sounds placed on the map (Vowel Morph's idwWeights)
+//     ─▶ blendSounds (pose-sound.js): f0 + 48 harmonic strengths from the pitched
+//        sounds, a noise-band shape from the fricatives, and their two shares
+//     ─▶ ONE synthesized voice (pose-audio.js: 48 sine oscillators + filtered noise)
 //
 // What "learning" means here: nothing is trained. Each recording is analyzed
 // once into a fundamental (f0) and 48 harmonic strengths (sound-analysis.js,
@@ -24,8 +26,9 @@ import { Tour } from '../../lib/tour.js';
 import { MicInput } from '../frequency/mic.js';
 import { VowelRecorder } from '../frequency/recorder.js';
 import { newId } from '../frequency/vowel-model.js';
-import { blendAt, isUsable, noteName, paramsOf, loadProject as loadMorphProject, POWERS } from '../vowel-morph/morph-model.js';
-import { MorphAudio } from '../vowel-morph/morph-audio.js';
+import { idwWeights, isUsable, noteName, loadProject as loadMorphProject, POWERS } from '../vowel-morph/morph-model.js';
+import { PoseAudio } from './pose-audio.js';
+import { soundParams, blendSounds, partGains, strongestBand, BAND_CENTERS } from './pose-sound.js';
 import { HarmonicBars } from '../vowel-morph/morph-plots.js';
 import { analyzeDrawnTake, estimateStartMs, positionAt, undoLastTake, thinPath, MAX_DRAW_TAKE_SEC, WINDOW_SEC, HOP_SEC } from '../vowel-morph/take-model.js';
 import { playDrum, drumCounters } from './drums.js';
@@ -37,7 +40,7 @@ import {
   LM, BEND_JOINTS, LIFT_JOINTS, LOST_GRACE_MS, DEFAULT_CAL, CLAP_BUFFER, PROJECT_KEY,
   poseAngles, anglesToPoint, pointToAngles, heldAngles, smoothAngles, estimateRange, scaleRange, setRangeEnd,
   percentPer10Deg, poseInRange, describePose, takeToAngles, poseTakeAnchors, placedSounds, clearMap,
-  RegionTrigger, loadProject, clamp01,
+  RegionTrigger, loadProject, clamp01, ForeRatio, jumpGuard,
 } from './pose-model.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -71,15 +74,27 @@ function readStored() {
   try { const raw = localStorage.getItem(PROJECT_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; }
 }
 
+const BACKUP_KEY = 'poseMap.project.backup-before-v4';
+
 export function mount(root) {
-  const project = loadProject(readStored());
+  const stored = readStored();
+  const project = loadProject(stored);
+  const justMigrated = !!(project.migratedFrom && stored && !(Number(stored.version) >= 4));
+  if (justMigrated) {
+    // Keep the map exactly as it was saved before the one-time update (see migrateToV4).
+    try { if (!localStorage.getItem(BACKUP_KEY)) localStorage.setItem(BACKUP_KEY, JSON.stringify(stored)); } catch { /* private mode */ }
+  }
   const save = () => { try { localStorage.setItem(PROJECT_KEY, JSON.stringify(project)); } catch { /* private mode: works until reload */ } };
+  if (justMigrated) save();
   const recs = new Map(); // audioId → { samples, sampleRate }
-  store.loadRecordings().then((r) => { for (const x of r.list) recs.set(x.id, x); renderAll(); });
+  // soundId → { code, text } for saved sounds whose recording analyzes differently now (checked once after loading)
+  const recheck = new Map();
+  store.loadRecordings().then((r) => { for (const x of r.list) recs.set(x.id, x); checkSavedSounds(); renderAll(); });
 
   const st = {
     camera: 'off', cameraMsg: 'Camera off.',
-    sim: false, simAngles: { bend: 15, lift: 15 },
+    sim: false, simAngles: { bend: 10, lift: 15 },
+    foreRatio: new ForeRatio(), guard: { last: null, pending: null }, held: 0,
     raw: null, lastResultMs: -Infinity, lastOkMs: -Infinity,
     angles: null, lastSmooth: performance.now(),
     dot: { x: 0, y: 0 }, tracking: false, lostText: '',
@@ -91,11 +106,14 @@ export function mount(root) {
     prevCal: null, prevSource: 'default', rangeMsg: '',
     replay: null, previewUntil: 0, gateWanted: null, drawStatus: '', mapMsg: '', tick: 0, groups: [],
   };
+  if (justMigrated) {
+    st.rangeMsg = `Updated for the new elbow measurement: your sounds and takes stay exactly where they were on the map, and the range is the new default (right elbow ${DEFAULT_CAL.bend.lo}°–${DEFAULT_CAL.bend.hi}°). The poses that reach them changed, because the elbow is now measured correctly when your forearm points toward the camera. A copy of the map from before is kept in this browser.`;
+  }
   // The guided "Add a sound" flow. step: record → listen → place → (confirm) → ready
   let flow = null;
   let drawing = null;
   const clap = new RegionTrigger({ buffer: CLAP_BUFFER });
-  const audio = new MorphAudio({ onChange: () => renderSoundState() });
+  const audio = new PoseAudio({ onChange: () => renderSoundState() });
   const mic = new MicInput({ onChange: () => {} });
   const recorder = new VowelRecorder();
   const tracker = new PoseTracker({ onResult: (r) => onPose(r), onStatus: (s, m) => { st.camera = s; st.cameraMsg = m; renderCamera(); } });
@@ -111,13 +129,17 @@ export function mount(root) {
   function onPose(r) {
     st.lastResultMs = performance.now();
     st.landmarks = r.landmarks;
-    const raw = poseAngles(r.landmarks, { world: r.world, aspect: (r.width || 640) / (r.height || 480) });
+    const raw = poseAngles(r.landmarks, { world: r.world, aspect: (r.width || 640) / (r.height || 480), foreRatio: st.foreRatio.value });
     st.raw = raw;
-    if (raw.ok) {
+    if (Number.isFinite(raw.ratio)) st.foreRatio.add(raw.ratio, performance.now());
+    // a one-frame jump of more than 60° is held back until the next frame confirms it
+    const use = raw.ok ? jumpGuard(st.guard, raw) : null;
+    if (raw.ok && !use) st.held++;
+    if (raw.ok && use) {
       const now = performance.now();
       const dt = (now - st.lastSmooth) / 1000;
       st.lastSmooth = now;
-      st.angles = smoothAngles(st.lastOkMs > now - 300 ? st.angles : null, raw, dt);
+      st.angles = smoothAngles(st.lastOkMs > now - 300 ? st.angles : null, use, dt);
       st.lastOkMs = now;
       if (st.capture) st.capture.samples.push({ bend: raw.bend, lift: raw.lift });
     } else if (st.capture) st.capture.lost.push(...raw.lost);
@@ -148,12 +170,14 @@ export function mount(root) {
     axisUi[ax.key].bar = h('div', { class: 'pm-bar' }, axisUi[ax.key].fill, axisUi[ax.key].target);
   }
   const trackOut = h('div', { class: 'pm-track' });
+  const bendNote = h('div', { class: 'pm-bend-note muted' });
   const targetOut = h('div', { class: 'pm-target-msg', 'aria-live': 'polite' });
   const axisPanel = h('div', { class: 'card pm-axis-panel', 'aria-label': 'Your two measurements and where they put the marker' },
     h('h2', {}, 'Your two arms → the marker'),
     AXES.map((ax) => h('div', { class: `pm-ax pm-ax-${ax.axis}`, 'data-axis': ax.key, style: { borderColor: ax.color } },
       h('div', { class: 'pm-ax-head', style: { color: ax.color } }, `${ax.dir} (${ax.axis}) = ${ax.label}`),
       h('div', { class: 'pm-ax-nums' }, axisUi[ax.key].angle, h('span', { class: 'muted' }, ' → '), axisUi[ax.key].coord),
+      ax.key === 'bend' ? bendNote : null,
       axisUi[ax.key].bar,
       h('div', { class: 'pm-bar-ends muted' }, axisUi[ax.key].lo, axisUi[ax.key].hi))),
     trackOut, targetOut,
@@ -217,6 +241,9 @@ export function mount(root) {
   const f0Out = h('div', { class: 'pm-f0' });
   const weightsOut = h('div', { class: 'pm-weights' });
   const harmCanvas = h('canvas', { class: 'pm-harm', 'aria-label': 'Harmonic strengths the synthesizer is playing now, in dB' });
+  const mixOut = h('div', { class: 'pm-mix' });
+  const noiseCanvas = h('canvas', { class: 'pm-noise', width: 640, height: 110, 'aria-label': 'Noise spectrum the synthesizer is playing now (fricatives), by frequency band' });
+  const noiseBox = h('div', { class: 'pm-noise-box', hidden: true }, h('div', { class: 'muted pm-sub' }, 'Noise part (fricatives): band levels of the filtered noise, dB'), noiseCanvas);
   const harmBars = new HarmonicBars(harmCanvas);
   const powerSel = h('select', { 'aria-label': 'Distance influence', onchange: () => { project.power = Number(powerSel.value); save(); } },
     POWERS.map((x) => h('option', { value: String(x.p), selected: project.power === x.p || null }, `${x.name} (power ${x.p})`)));
@@ -255,12 +282,14 @@ export function mount(root) {
   const soundCard = h('section', { class: 'card pm-sound' },
     h('h2', {}, 'What you hear'),
     h('div', { class: 'row gap wrap' }, soundBtn, h('label', { class: 'row gap' }, 'Volume', volume)),
-    h('p', { class: 'help pm-explain' }, 'Your arms only move the marker. The sounds you placed decide what you hear: at each spot the synthesizer plays one tone whose pitch (f0) and harmonic strengths are a distance-weighted mix of the nearby sounds. Example: put “ah” on the left and “ee” on the right, then bend your right elbow to glide between them; put a hum higher up and lift your left arm to move toward it.'),
+    h('p', { class: 'help pm-explain' }, 'Your arms only move the marker. The sounds you placed decide what you hear: at each spot the synthesizer plays one tone whose pitch (f0) and harmonic strengths are a distance-weighted mix of the nearby sounds. Example: put “ah” on the left and “ee” on the right, then bend your right elbow to glide between them; put a hum higher up and lift your left arm to move toward it. A fricative (“sss”) adds a noise part with no pitch; between it and a vowel you hear the vowel’s harmonics and the hiss mixed in one sound, never two recordings at once.'),
     f0Out,
     h('div', { class: 'muted pm-sub' }, 'Share of each of your sounds right now'),
     weightsOut,
+    mixOut,
     h('div', { class: 'muted pm-sub' }, 'Harmonic strengths of the synthesized tone (dB; harmonic number below)'),
     harmCanvas,
+    noiseBox,
     h('div', { class: 'row gap wrap pm-sound-opts' }, h('label', { class: 'row gap' }, 'Distance influence', powerSel)),
     clapCard);
   const libraryCard = h('section', { class: 'card pm-sounds' },
@@ -372,7 +401,7 @@ export function mount(root) {
   function vowelMorphOptions() {
     let raw = null;
     try { raw = JSON.parse(localStorage.getItem('vowelMorph.project.v1') || 'null'); } catch { raw = null; }
-    return loadMorphProject(raw).vowels.filter(isUsable).map((v) => ({ id: `vm:${v.id}`, label: `${v.name} (${fmtHz(v.analysis.f0)})`, name: v.name, analysis: { status: 'ok', f0: v.analysis.f0, amps: v.analysis.amps } }));
+    return loadMorphProject(raw).vowels.filter(isUsable).map((v) => ({ id: `vm:${v.id}`, label: `${v.name} (${fmtHz(v.analysis.f0)})`, name: v.name, analysis: { kind: 'pitched', status: 'ok', f0: v.analysis.f0, amps: v.analysis.amps } }));
   }
 
   function nextName() {
@@ -519,7 +548,8 @@ export function mount(root) {
     stopReplay();
     st.previewUntil = performance.now() + 1600;
     audio.setGate(1, 0.01); st.gateWanted = 1;
-    const p = paramsOf({ analysis });
+    const one = soundParams(analysis);
+    const p = one && blendSounds([{ params: one, weight: 1 }]);
     if (p && audio.playSynth(p, label)) setTimeout(() => { if (!st.soundOn && audio.label === label) audio.stop(); }, 1500);
   }
 
@@ -671,7 +701,7 @@ export function mount(root) {
     const s = a.stats;
     const first = take.points[0];
     const last = take.points[take.points.length - 1];
-    st.drawStatus = `${take.name}: learned ${s.usable} point${s.usable === 1 ? '' : 's'} from ${s.snippets} snippet${s.snippets === 1 ? '' : 's'} (skipped ${s.silent} silent, ${s.unreliable} without a reliable pitch${s.outsidePath ? `, ${s.outsidePath} before/after the drawing` : ''}). Each dot is a synthesized sound reconstructed from 0.2 s of your recording.`
+    st.drawStatus = `${take.name}: learned ${s.usable} point${s.usable === 1 ? '' : 's'} from ${s.snippets} snippet${s.snippets === 1 ? '' : 's'} (skipped ${s.silent} silent, ${s.unreliable} without a reliable pitch${s.outsidePath ? `, ${s.outsidePath} before/after the drawing` : ''}). Each dot is a synthesized sound reconstructed from 0.2 s of your recording.${s.unreliable ? ' Drawn takes only learn pitched sounds: unpitched snippets such as “sss” or “shh” are skipped, not learned. To put a fricative on the map, record it with 🎤 Add a sound.' : ''}`
       + (s.usable ? ` Preview it with “▶ Preview along the line”, or play it with your arms: start at ${describePose(first)} (the ● at the start) and move toward ${describePose(last)}.`
         : ' Nothing usable: sing a steady, voiced sound while drawing, or undo this take.');
     renderAll();
@@ -716,12 +746,84 @@ export function mount(root) {
   }
 
   // ───────────── sound ─────────────
+  /** Short description of an analysis for lists. */
+  function soundLabel(an) {
+    if (an.kind === 'noise') return `noise, no pitch (fricative; strongest near ${strongestBand(an.noise.bands)})`;
+    return `${fmtHz(an.f0)} (pitched)`;
+  }
+
+  /** Bar graph of noise band levels (dB re the strongest band, −40 dB floor). */
+  function drawBands(cv, bands) {
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    const W = cv.width; const H = cv.height; const pad = 18;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#0b0f14'; ctx.fillRect(0, 0, W, H);
+    const bw = (W - 8) / bands.length;
+    ctx.fillStyle = '#c3a6ff';
+    bands.forEach((a, i) => {
+      const db = a > 0 ? Math.max(-40, 20 * Math.log10(a)) : -40;
+      const hgt = ((db + 40) / 40) * (H - pad - 6);
+      ctx.fillRect(4 + i * bw + 1, H - pad - hgt, bw - 2, hgt);
+    });
+    ctx.fillStyle = '#8b98a5'; ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'center';
+    for (const f of [250, 500, 1000, 2000, 4000, 8000]) {
+      const i = BAND_CENTERS.findIndex((c) => c >= f);
+      if (i >= 0) ctx.fillText(f >= 1000 ? `${f / 1000}k` : String(f), 4 + (i + 0.5) * bw, H - 4);
+    }
+  }
+
+  /**
+   * Re-checks every saved sound against its stored recording with today's
+   * analysis (once, after the recordings load). A sound that no longer passes,
+   * or that is now recognized as a different kind (for example a fricative that
+   * was saved as a pitched sound), is flagged in Your recordings.
+   */
+  function checkSavedSounds() {
+    recheck.clear();
+    for (const sd of project.sounds) {
+      const rec = sd.audioId && recs.get(sd.audioId);
+      if (!rec) continue;
+      let r;
+      try { r = analyzeMySound(rec); } catch { continue; }
+      const was = sd.analysis.kind === 'noise' ? 'noise' : 'pitched';
+      if (!r.ok) recheck.set(sd.id, { code: 'fails', text: `Its recording does not pass today’s analysis (${r.reason}) It still plays the numbers saved earlier, which may not match the recording. Record it again, or delete it.` });
+      else if (r.analysis.kind !== was) recheck.set(sd.id, { code: 'kind', now: r.analysis.kind, text: `Saved as a ${was} sound, but its recording is ${r.analysis.kind === 'noise' ? 'an unvoiced fricative (noise, no pitch)' : 'a pitched sound'}. Press “Analyze again” to update it.` });
+    }
+  }
+
+  function reanalyze(sd) {
+    const rec = sd.audioId && recs.get(sd.audioId);
+    if (!rec) return;
+    const r = analyzeMySound(rec);
+    if (!r.ok) { recheck.set(sd.id, { code: 'fails', text: `Analyzing again did not work either: ${r.reason} ${r.tip} Record it again, or delete it.` }); renderAll(); return; }
+    sd.analysis = r.analysis;
+    recheck.delete(sd.id);
+    st.mapMsg = `“${sd.name}” analyzed again: ${soundLabel(sd.analysis)}.`;
+    save();
+    renderAll();
+  }
+
   function placedAnchors() {
     return [...placedSounds(project.sounds, project.cal), ...poseTakeAnchors(project.takes, project.cal).map((a) => ({ ...a, src: a }))];
   }
 
+  /**
+   * The sound at the marker: inverse-distance weights of every placed sound
+   * and take point, then ONE parameter set for the synthesizer (blendSounds).
+   * contributions are exactly the weights the synthesizer used.
+   */
+  function blendHere(anchors, point) {
+    const usable = anchors.map((a) => ({ a, p: soundParams(a.analysis) })).filter((x) => x.p);
+    if (!usable.length) return { contributions: [], params: null };
+    const w = idwWeights(usable.map((x) => x.a.pos), point, project.power);
+    const contributions = usable.map((x, i) => ({ vowel: x.a, weight: w[i], kind: x.p.kind }));
+    const params = blendSounds(usable.map((x, i) => ({ params: x.p, weight: w[i] })));
+    return { contributions, params };
+  }
+
   function currentBlend() {
-    return blendAt(placedAnchors(), st.dot, project.power);
+    return blendHere(placedAnchors(), st.dot);
   }
 
   function startSound() {
@@ -768,7 +870,7 @@ export function mount(root) {
     else if (now - st.lastResultMs > STALE_MS) { tracking = false; lostText = 'No camera frames.'; }
     else {
       tracking = !!st.angles && now - st.lastOkMs <= LOST_GRACE_MS;
-      if (!tracking) lostText = st.raw && st.raw.noPerson ? 'No person in view: step into the picture.' : `Lost: ${st.raw ? st.raw.lost.join(', ') : 'joints'}. Keep it in view of the camera.`;
+      if (!tracking) lostText = st.raw && st.raw.noPerson ? 'No person in view: step into the picture.' : `Lost: ${st.raw ? st.raw.lost.join(', ') : 'joints'} (not visible or outside the picture). Keep it in view of the camera.`;
     }
     if (tracking !== st.tracking) {
       st.tracking = tracking;
@@ -958,13 +1060,15 @@ export function mount(root) {
     const rows = project.sounds.map((s) => h('div', { class: `pm-row${s.id === st.selectedId ? ' selected' : ''}`, 'data-id': s.id },
       h('span', { class: 'pm-swatch', style: { background: colorOf(s) } }),
       h('b', {}, s.name),
-      h('span', { class: 'muted pm-row-info' }, `${fmtHz(s.analysis.f0)} · ${s.place ? `on the map: ${describePose(s.place.angles)}${poseInRange(s.place.angles, project.cal) ? '' : ' · outside range'}` : 'not on the map'}${s.source === 'vowel-morph' ? ' · from Vowel Morph' : ''}`),
+      h('span', { class: 'muted pm-row-info' }, `${soundLabel(s.analysis)} · ${s.place ? `on the map: ${describePose(s.place.angles)}${poseInRange(s.place.angles, project.cal) ? '' : ' · outside range'}` : 'not on the map'}${s.source === 'vowel-morph' ? ' · from Vowel Morph' : ''}`),
       h('span', { class: 'row gap wrap pm-row-btns' },
         recs.get(s.audioId) ? h('button', { class: 'btn small', onclick: () => playOriginal(s.audioId, `Original: ${s.name}`) }, '▶ Original') : null,
         h('button', { class: 'btn small', onclick: () => playSynth(s.analysis, `Synthesized: ${s.name}`) }, '▶ Synthesized'),
         h('button', { class: 'btn small pm-place', onclick: () => openFlow(s) }, s.place ? '↻ Redo position' : '📍 Place on map'),
         s.place ? h('button', { class: 'btn small pm-unplace', onclick: () => removeFromMap(s) }, 'Remove from map') : null,
-        h('button', { class: 'btn small danger pm-del-rec', 'aria-label': `Delete recording ${s.name}`, onclick: () => deleteRecording(s) }, '🗑 Delete recording'))));
+        recheck.get(s.id) ? h('button', { class: 'btn small pm-reanalyze', onclick: () => reanalyze(s) }, '↻ Analyze again') : null,
+        h('button', { class: 'btn small danger pm-del-rec', 'aria-label': `Delete recording ${s.name}`, onclick: () => deleteRecording(s) }, '🗑 Delete recording')),
+      recheck.get(s.id) ? h('div', { class: 'pm-flag', role: 'note' }, `⚠ ${recheck.get(s.id).text}`) : null));
     libSoundsEl.replaceChildren(...(rows.length ? rows : [h('p', { class: 'help' }, 'No recordings yet. Press 🎤 Add a sound to make your first one.')]));
   }
 
@@ -1028,7 +1132,10 @@ export function mount(root) {
         h('div', { class: 'row gap wrap' },
           h('button', { class: 'btn pm-orig', disabled: !recs.get(s.audioId), onclick: () => playOriginal(s.audioId, 'Original') }, '▶ Original recording'),
           h('button', { class: 'btn pm-synth', onclick: () => playSynth(an, 'Synthesized') }, '▶ Synthesized version')),
-        h('div', { class: 'pm-heard' },
+        an.kind === 'noise' ? h('div', { class: 'pm-heard' },
+          h('div', {}, h('b', {}, 'What the app measured: '), `no pitch: this is an unvoiced fricative-like noise. ${sm ? `Only ${sm.framesPeriodic} of ${sm.framesTotal} short frames had a pitch, ${Math.round((sm.highShare || 0) * 100)} % of the energy is above 2 kHz, centred near ${sm.centroidHz} Hz, strongest band ${sm.strongestBand}.` : ''}`),
+          h('div', {}, h('b', {}, 'What it will synthesize where you place it: '), 'white noise shaped by 24 band filters to the spectrum below (no fundamental frequency, no harmonics). Near a vowel the map mixes this noise part with the vowel’s harmonics in one synthesized sound. Only the overall spectrum shape is kept: the hiss sounds similar but not identical to your recording, and its loudness is matched to the other sounds.'),
+          h('canvas', { class: 'pm-noise pm-draft-noise', width: 640, height: 110, 'aria-label': 'Noise spectrum of your sound' })) : h('div', { class: 'pm-heard' },
           h('div', {}, h('b', {}, 'What the app measured: '), sm ? `a fundamental (pitch) of ${fmtHz(an.f0)} (${noteName(an.f0)}) on the steady part ${sm.sectionSec[0]}–${sm.sectionSec[1]} s; ${sm.framesPeriodic} of ${sm.framesTotal} short frames had a clear pitch${sm.spreadCents != null ? `, within ${sm.spreadCents} cents` : ''}; ${sm.harmonicsKept} harmonics stood out above the noise. ${warningText(sm.warnings)}` : `a fundamental of ${fmtHz(an.f0)} (${noteName(an.f0)}), analyzed in Vowel Morph.`),
           h('div', {}, h('b', {}, 'What it will synthesize where you place it: '), `one steady tone at ${fmtHz(an.f0)} made of 48 sine waves (1×, 2×, 3×… that pitch) with the strengths below. That is all the app keeps from the sound; the recording itself is not played on the map.`),
           h('canvas', { class: 'pm-harm pm-draft-harm', 'aria-label': 'Harmonic strengths of your sound' })),
@@ -1074,6 +1181,8 @@ export function mount(root) {
       stepsBar, ...body);
     const cv = flowCard.querySelector('.pm-draft-harm');
     if (cv && s) new HarmonicBars(cv).set({ amps: s.analysis.amps });
+    const nv = flowCard.querySelector('.pm-draft-noise');
+    if (nv && s && s.analysis.noise) drawBands(nv, s.analysis.noise.bands);
     renderButtons();
   }
 
@@ -1098,8 +1207,13 @@ export function mount(root) {
       u.target.hidden = tgt == null;
       if (tgt != null) u.target.style.left = `${tgt * 100}%`;
     }
-    trackOut.textContent = st.replay ? 'Previewing a take along its line (camera ignored until it ends)' : st.tracking ? (st.sim ? 'Tracking: practice sliders' : 'Tracking both arms') : `${st.lostText} The sound fades until tracking returns.`;
-    trackOut.className = `pm-track ${st.tracking || st.replay ? 'ok' : 'bad'}`;
+    const rw = st.raw;
+    const bn = !st.tracking || st.sim || !rw || !Number.isFinite(rw.imageBend) ? ''
+      : rw.depthShare > 0.25 ? `Forearm points toward the camera: ${deg(rw.imageBend)} in the picture, ${deg(rw.bend)} with the depth correction.` : `Measured in the picture (${deg(rw.bend)}).`;
+    if (bendNote.textContent !== bn) bendNote.textContent = bn;
+    const weak = st.tracking && !st.sim && rw && rw.weak && rw.weak.length ? ` Unreliable: ${rw.weak.join(', ')} hard to see, so the reading may jump.` : '';
+    trackOut.textContent = st.replay ? 'Previewing a take along its line (camera ignored until it ends)' : st.tracking ? (st.sim ? 'Tracking: practice sliders' : 'Tracking both arms') + weak : `${st.lostText} The marker stays where it was and the sound fades until tracking returns.`;
+    trackOut.className = `pm-track ${(st.tracking && !weak) || st.replay ? 'ok' : 'bad'}`;
     const tgtText = sel && sel.place ? `Target for “${sel.name}” (◆): right elbow bend ${deg(sel.place.angles.bend)}, left arm lift ${deg(sel.place.angles.lift)}.` : '';
     if (targetOut.textContent !== tgtText) targetOut.textContent = tgtText;
     gLines.replaceChildren();
@@ -1107,7 +1221,8 @@ export function mount(root) {
       const groups = new Map();
       for (const { vowel, weight } of b.contributions) {
         const key = vowel.takeId || vowel.id;
-        const g = groups.get(key) || { name: vowel.takeId ? `${(project.takes.find((t) => t.id === vowel.takeId) || {}).name || 'Take'} (drawn)` : vowel.name, color: vowel.takeId ? takeColor(vowel.takeId) : colorOf(vowel.src), weight: 0 };
+        const isNoise = vowel.analysis && vowel.analysis.kind === 'noise';
+        const g = groups.get(key) || { name: vowel.takeId ? `${(project.takes.find((t) => t.id === vowel.takeId) || {}).name || 'Take'} (drawn)` : `${vowel.name}${isNoise ? ' (noise)' : ''}`, color: vowel.takeId ? takeColor(vowel.takeId) : colorOf(vowel.src), weight: 0, kind: isNoise ? 'noise' : 'pitched' };
         g.weight += weight;
         groups.set(key, g);
         if (weight >= 0.01) {
@@ -1120,17 +1235,30 @@ export function mount(root) {
         // When the sound is on, show the parameters the synthesizer is actually using.
         const playing = st.soundOn && audio.voice ? audio.voice.params : null;
         const p = playing || b.params;
-        f0Out.replaceChildren(h('span', { class: 'muted' }, playing ? 'Synthesizer now: ' : 'Here (sound off): '), h('b', {}, `${p.f0.toFixed(1)} Hz`), ` ${noteName(p.f0)}`);
+        // a part under 1 % (the marker a hair away from a dot) is inaudible: gain √0.01 = −20 dB below the other part, usually far less
+        const pitchedShare = p.harm ?? 1;
+        const hasPitch = Number.isFinite(p.f0) && pitchedShare >= 0.01;
+        const hasNoise = !!p.bands && (p.noise || 0) >= 0.01;
+        f0Out.replaceChildren(h('span', { class: 'muted' }, playing ? 'Synthesizer now: ' : 'Here (sound off): '),
+          hasPitch ? h('span', {}, h('b', {}, `${p.f0.toFixed(1)} Hz`), ` ${noteName(p.f0)}`) : h('b', {}, 'no pitch (noise only)'));
+        const gains = partGains(p);
+        mixOut.textContent = hasNoise
+          ? `One synthesized sound: ${pct(pitchedShare)} pitched part (f0 and harmonics from your pitched sounds only) + ${pct(p.noise)} noise part (from your fricatives). Played at gains ${gains.harm.toFixed(2)} and ${gains.noise.toFixed(2)} (equal-power mix).`
+          : 'One synthesized sound: f0 and harmonic strengths mixed from your pitched sounds by the shares above.';
         weightsOut.replaceChildren(...st.groups.filter((g, i) => i === 0 || g.weight >= 0.005).slice(0, 6).map((g) => h('div', { class: 'pm-wrow' },
           h('span', { class: 'pm-swatch', style: { background: g.color } }), h('span', { class: 'pm-wname' }, g.name),
           h('span', { class: 'pm-wbar' }, h('span', { style: { width: `${g.weight * 100}%`, background: g.color } })), h('span', {}, pct(g.weight)))));
-        harmBars.set({ amps: p.amps });
+        harmBars.set(hasPitch ? { amps: p.amps } : { amps: null, empty: 'No pitched part here' });
+        noiseBox.hidden = !hasNoise;
+        if (p.bands) drawBands(noiseCanvas, p.bands);
       }
     } else if (st.tick % 4 === 0) {
       st.groups = [];
       f0Out.textContent = 'Nothing to hear yet: the map is empty.';
       weightsOut.replaceChildren(h('p', { class: 'help' }, 'Add a sound to the map to see each sound’s share here.'));
       harmBars.set({ amps: null, empty: 'No sounds on the map yet' });
+      mixOut.textContent = '';
+      noiseBox.hidden = true;
     }
     const fresh = now - st.lastClapAt < 450;
     clapOut.textContent = !project.clap.on ? 'Clap off' : fresh ? '👏 Clap!' : clap.count ? `Clap played ${clap.count}×. ${clap.inside ? 'Holding inside: quiet.' : 'Ready.'}` : 'Ready: move into the ring.';
@@ -1189,7 +1317,7 @@ export function mount(root) {
     debug: () => ({
       sim: st.sim, tracking: st.tracking, lostText: st.lostText, raw: st.raw && { ...st.raw }, angles: st.angles && { ...st.angles }, dot: { ...st.dot },
       soundOn: st.soundOn, gate: audio.gate ? audio.gate.gain.value : null, gateTarget: audio.gateLevel ?? null,
-      blend: (() => { const b = currentBlend(); return { params: b.params, weights: b.contributions.map((x) => ({ name: x.vowel.name, id: x.vowel.id, takeId: x.vowel.takeId || null, weight: x.weight })) }; })(),
+      blend: (() => { const b = currentBlend(); return { params: b.params, weights: b.contributions.map((x) => ({ name: x.vowel.name, id: x.vowel.id, takeId: x.vowel.takeId || null, kind: x.kind, weight: x.weight })) }; })(),
       groups: (st.groups || []).map((g) => ({ name: g.name, weight: g.weight })),
       shown: { f0: f0Out.textContent, axis: AXES.map((ax) => `${axisUi[ax.key].angle.textContent} ${axisUi[ax.key].coord.textContent}`) },
       audio: audio.debug(), claps: drumCounters.clap, busy: st.busy, countdown: st.countdown,
@@ -1197,6 +1325,9 @@ export function mount(root) {
       mode: st.mode, micListening: mic.listening, drawing: !!drawing, drawStatus: st.drawStatus, mapMsg: st.mapMsg, selectedId: st.selectedId, replay: !!st.replay,
       flow: flow && { step: flow.step, soundId: flow.soundId, name: flow.name, ok: flow.result ? flow.result.ok : null, code: flow.result ? flow.result.code : null, msg: flow.msg, placeMsg: flow.placeMsg },
       pending: st.pending && { ...st.pending.angles }, empty: mapEmpty(), emptyShown: !emptyNote.hidden,
+      foreRatio: st.foreRatio.value, held: st.held, weak: st.raw && st.raw.weak ? [...st.raw.weak] : [], imageBend: st.raw ? st.raw.imageBend : null, depthShare: st.raw ? st.raw.depthShare : null,
+      shownMix: mixOut.textContent, shownTrack: trackOut.textContent, shownBendNote: bendNote.textContent, noiseShown: !noiseBox.hidden,
+      recheck: [...recheck.entries()].map(([id, v]) => ({ id, ...v })), migratedFrom: project.migratedFrom || null,
       rangeMsg: st.rangeMsg, ghosts: st.ghosts.length,
       onMap: placedSounds(project.sounds, project.cal).map((a) => ({ id: a.id, name: a.name, pos: a.pos, outside: !poseInRange(a.angles, project.cal) })),
       project: JSON.parse(JSON.stringify(project)), tourOpen: tour.open, tourStep: tour.i,

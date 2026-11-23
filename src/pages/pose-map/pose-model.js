@@ -3,7 +3,9 @@
 //
 // Two JOINT ANGLES from the camera's body landmarks (not x/y positions):
 //   right elbow bend = 180° − (angle at the right elbow between the right
-//                      shoulder and the right wrist); 0° = arm straight
+//                      shoulder and the right wrist); 0° = arm straight.
+//                      Measured from the image with a depth correction for a
+//                      forearm that points toward the camera (elbowBend()).
 //   left arm lift    = angle at the left shoulder between the left hip and
 //                      the left elbow; about 10–20° = arm hanging down,
 //                      90° = straight out to the side, 180° = overhead
@@ -26,6 +28,7 @@
 // exactly that sound. Starter sounds are the exception: they are defined
 // relative to the range (its corners), so they keep their map position.
 import { MAX_HARMONICS } from '../frequency/vowel-model.js';
+import { cleanBands } from './pose-sound.js';
 
 // MediaPipe Pose landmark indices ("left"/"right" are the PERSON's sides).
 export const LM = Object.freeze({ leftShoulder: 11, rightShoulder: 12, leftElbow: 13, rightElbow: 14, leftWrist: 15, rightWrist: 16, leftHip: 23, rightHip: 24 });
@@ -35,7 +38,17 @@ export const LIFT_JOINTS = Object.freeze([LM.leftHip, LM.leftShoulder, LM.leftEl
 export const MIN_VISIBILITY = 0.5; // below this a joint counts as lost
 export const LOST_GRACE_MS = 250; // a joint must be missing this long before the sound fades
 export const SMOOTH_TAU = 0.08; // s, light smoothing of the angles
-export const DEFAULT_CAL = Object.freeze({ bend: { lo: 15, hi: 130 }, lift: { lo: 15, hi: 120 } });
+// Comfortable default: arm relaxed (≈10°) to a right-angle bend (≈100°).
+export const DEFAULT_CAL = Object.freeze({ bend: { lo: 10, hi: 100 }, lift: { lo: 15, hi: 120 } });
+// The default before November 23, 2026 (needed a nearly full curl to reach the right edge).
+export const OLD_DEFAULT_CAL = Object.freeze({ bend: { lo: 15, hi: 130 }, lift: { lo: 15, hi: 120 } });
+// Forearm (elbow→wrist) length ÷ upper arm (shoulder→elbow) length of a
+// straight arm in MediaPipe landmarks. ForeRatio learns the person's own value.
+export const FORE_RATIO_DEFAULT = 0.9;
+export const FORE_RATIO_LIMITS = Object.freeze([0.7, 1.1]);
+export const LOW_CONFIDENCE = 0.75; // visibility below this (but above MIN_VISIBILITY): "tracking is unreliable"
+export const EDGE_MARGIN = 0.02; // a landmark further than this outside the picture is guessed, not seen
+export const MAX_JUMP_DEG = 60; // a single-frame jump bigger than this is held back until a 2nd frame confirms it
 export const MIN_SPAN = 20; // degrees: a calibrated range is never narrower than this
 export const ANGLE_LIMITS = Object.freeze({ bend: [0, 170], lift: [0, 180] }); // what the joints can physically reach
 export const MIN_MOVE = 15; // degrees: an angle that moved less than this while adjusting keeps its old range
@@ -59,28 +72,98 @@ export function angleAt(a, b, c) {
 }
 
 /**
- * Joint angles from one frame of landmarks.
- *   lms     33 landmarks {x, y, z, visibility} (image coordinates, 0…1)
- *   world   optional 33 world landmarks in metres (better for angles; used when present)
- *   aspect  width / height of the image (2D fallback only)
- * Returns { bend, lift, lost: [joint names], ok }.
+ * Right elbow bend from 2D image points S (shoulder), E (elbow), W (wrist),
+ * x already scaled by the image aspect. When the forearm points toward (or
+ * away from) the camera, it looks SHORTER in the picture than it is, and its
+ * direction in the picture says little about the bend. The forearm's
+ * expected length is foreRatio × upper-arm length; the missing length is
+ * treated as depth:
+ *   depth = √(expected² − seen²)   (0 when the forearm looks full length)
+ *   bend  = 180° − angle(upper arm, (forearm x, forearm y, depth))
+ * So a forearm pointing straight at the camera reads ≈ 90°, which the plain
+ * picture angle cannot show. Returns { bend, imageBend, depthShare }.
  */
-export function poseAngles(lms, { world = null, aspect = 16 / 9, minVisibility = MIN_VISIBILITY } = {}) {
+export function elbowBend(S, E, W, foreRatio = FORE_RATIO_DEFAULT) {
+  const ux = S.x - E.x; const uy = S.y - E.y;
+  const fx = W.x - E.x; const fy = W.y - E.y;
+  const lu = Math.hypot(ux, uy);
+  const lf = Math.hypot(fx, fy);
+  if (!(lu > 1e-6)) return { bend: NaN, imageBend: NaN, depthShare: 0 };
+  const imageBend = lf > 1e-6 ? 180 - angleAt(S, E, W) : NaN;
+  const expected = foreRatio * lu;
+  const depth = lf < expected ? Math.sqrt(expected * expected - lf * lf) : 0;
+  const bend = 180 - angleAt({ x: ux, y: uy, z: 0 }, { x: 0, y: 0, z: 0 }, { x: fx, y: fy, z: depth });
+  return { bend, imageBend, depthShare: expected > 0 ? depth / expected : 0 };
+}
+
+/** Learns the person's straight-arm forearm ÷ upper-arm ratio (95th percentile of the last ~10 s). */
+export class ForeRatio {
+  constructor() { this.samples = []; }
+  add(ratio, tMs) {
+    if (!(ratio > 0.3 && ratio < 1.6)) return;
+    this.samples.push({ r: ratio, t: tMs });
+    while (this.samples.length && this.samples[0].t < tMs - 10000) this.samples.shift();
+  }
+  get value() {
+    if (this.samples.length < 15) return FORE_RATIO_DEFAULT;
+    const v = percentile(this.samples.map((s) => s.r), 95);
+    return Math.min(FORE_RATIO_LIMITS[1], Math.max(FORE_RATIO_LIMITS[0], Math.max(v, FORE_RATIO_DEFAULT * 0.9)));
+  }
+}
+
+/**
+ * Joint angles from one frame of landmarks.
+ *   lms        33 landmarks {x, y, z, visibility} (image coordinates, 0…1)
+ *   world      optional world landmarks (metres); used for the left arm lift only
+ *   aspect     width / height of the image
+ *   foreRatio  straight-arm forearm ÷ upper-arm ratio (ForeRatio)
+ * A joint counts as LOST when its visibility is below MIN_VISIBILITY or it is
+ * outside the picture (MediaPipe still guesses a position there, which would
+ * send the marker somewhere random). The bend then is NaN, never a guess.
+ * Returns { bend, lift, lost: [joint names], ok, imageBend, depthShare, ratio, weak: [joint names] }.
+ */
+export function poseAngles(lms, { world = null, aspect = 16 / 9, minVisibility = MIN_VISIBILITY, foreRatio = FORE_RATIO_DEFAULT } = {}) {
   const lost = [];
   if (!Array.isArray(lms) || lms.length < 25) {
-    return { bend: NaN, lift: NaN, lost: [...BEND_JOINTS, ...LIFT_JOINTS].map((i) => JOINT_NAMES[i]), ok: false, noPerson: true };
+    return { bend: NaN, lift: NaN, lost: [...BEND_JOINTS, ...LIFT_JOINTS].map((i) => JOINT_NAMES[i]), weak: [], ok: false, noPerson: true };
   }
-  const seen = (i) => lms[i] && Number.isFinite(lms[i].x) && Number.isFinite(lms[i].y) && (lms[i].visibility == null || lms[i].visibility >= minVisibility);
-  for (const i of [...BEND_JOINTS, ...LIFT_JOINTS]) if (!seen(i)) lost.push(JOINT_NAMES[i]);
+  const inPicture = (p) => p.x >= -EDGE_MARGIN && p.x <= 1 + EDGE_MARGIN && p.y >= -EDGE_MARGIN && p.y <= 1 + EDGE_MARGIN;
+  const seen = (i) => lms[i] && Number.isFinite(lms[i].x) && Number.isFinite(lms[i].y) && (lms[i].visibility == null || lms[i].visibility >= minVisibility) && inPicture(lms[i]);
+  const weak = [];
+  for (const i of [...BEND_JOINTS, ...LIFT_JOINTS]) {
+    if (!seen(i)) lost.push(JOINT_NAMES[i]);
+    else if (lms[i].visibility != null && lms[i].visibility < LOW_CONFIDENCE) weak.push(JOINT_NAMES[i]);
+  }
+  const img = (i) => ({ x: lms[i].x * aspect, y: lms[i].y, z: 0 });
   const P = (i) => {
     if (world && world[i] && Number.isFinite(world[i].x)) return { x: world[i].x, y: world[i].y, z: world[i].z || 0 };
-    return { x: lms[i].x * aspect, y: lms[i].y, z: 0 };
+    return img(i);
   };
   const bendOk = BEND_JOINTS.every(seen);
   const liftOk = LIFT_JOINTS.every(seen);
-  const bend = bendOk ? 180 - angleAt(P(LM.rightShoulder), P(LM.rightElbow), P(LM.rightWrist)) : NaN;
+  let bend = NaN; let imageBend = NaN; let depthShare = 0; let ratio = NaN;
+  if (bendOk) {
+    const S = img(LM.rightShoulder); const E = img(LM.rightElbow); const W = img(LM.rightWrist);
+    const eb = elbowBend(S, E, W, foreRatio);
+    bend = eb.bend; imageBend = eb.imageBend; depthShare = eb.depthShare;
+    const lu = Math.hypot(S.x - E.x, S.y - E.y);
+    ratio = lu > 1e-6 ? Math.hypot(W.x - E.x, W.y - E.y) / lu : NaN;
+  }
   const lift = liftOk ? angleAt(P(LM.leftHip), P(LM.leftShoulder), P(LM.leftElbow)) : NaN;
-  return { bend, lift, lost, ok: bendOk && liftOk && Number.isFinite(bend) && Number.isFinite(lift) };
+  return { bend, lift, lost, weak, imageBend, depthShare, ratio, ok: bendOk && liftOk && Number.isFinite(bend) && Number.isFinite(lift) };
+}
+
+/**
+ * Holds back a single-frame jump: a change of more than MAX_JUMP_DEG from the
+ * last accepted reading is only accepted when the next frame agrees.
+ * state = { last: {bend, lift} | null, pending: {bend, lift} | null }. Returns the angles to use or null (skip this frame).
+ */
+export function jumpGuard(state, raw) {
+  const far = (a, b) => Math.abs(a.bend - b.bend) > MAX_JUMP_DEG || Math.abs(a.lift - b.lift) > MAX_JUMP_DEG;
+  if (!state.last || !far(state.last, raw)) { state.last = { bend: raw.bend, lift: raw.lift }; state.pending = null; return state.last; }
+  if (state.pending && !far(state.pending, raw)) { state.last = { bend: raw.bend, lift: raw.lift }; state.pending = null; return state.last; }
+  state.pending = { bend: raw.bend, lift: raw.lift };
+  return null;
 }
 
 /** Angles → map point using the calibrated ranges. Each angle drives one axis only. */
@@ -285,7 +368,7 @@ export const PROJECT_KEY = 'poseMap.project.v1';
 // "Clear map" takes everything off the map but keeps the library, so any
 // recording can be placed again; deleting a recording is a separate action.
 export function emptyProject() {
-  return { version: 3, sounds: [], takes: [], cal: JSON.parse(JSON.stringify(DEFAULT_CAL)), calSource: 'default', clap: { on: false, region: { x: 0.9, y: 0.9, r: 0.16 } }, power: 2 };
+  return { version: 4, sounds: [], takes: [], cal: JSON.parse(JSON.stringify(DEFAULT_CAL)), calSource: 'default', clap: { on: false, region: { x: 0.9, y: 0.9, r: 0.16 } }, power: 2 };
 }
 
 /** A clean library sound (null if it has no playable analysis). */
@@ -320,19 +403,32 @@ export function clearMap(project) {
   return { sounds, takes };
 }
 
+/** A clean analysis: pitched { kind, status, f0, amps } or noise { kind: 'noise', status, f0: null, amps: [], noise: { bands } } (null if unplayable). */
+export function cleanAnalysis(an) {
+  if (!an || typeof an !== 'object') return null;
+  const sm = an.summary && typeof an.summary === 'object' ? { summary: JSON.parse(JSON.stringify(an.summary)) } : {};
+  if (an.kind === 'noise') {
+    const bands = cleanBands(an.noise && an.noise.bands);
+    if (!bands.some((v) => v > 0)) return null;
+    return { kind: 'noise', status: 'ok', f0: null, amps: [], noise: { bands }, ...sm };
+  }
+  const f0 = Number(an.f0);
+  if (!(f0 > 0) || !Array.isArray(an.amps)) return null;
+  const amps = new Array(MAX_HARMONICS).fill(0);
+  for (let i = 0; i < MAX_HARMONICS && i < an.amps.length; i++) { const v = Number(an.amps[i]); amps[i] = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0; }
+  if (!amps.some((v) => v > 0)) return null;
+  return { kind: 'pitched', status: an.status === 'warning' ? 'warning' : 'ok', f0, amps, ...sm };
+}
+
 export function cleanAnchor(a) {
   if (!a || typeof a !== 'object' || !a.analysis) return null;
-  const f0 = Number(a.analysis.f0);
-  if (!(f0 > 0) || !Array.isArray(a.analysis.amps)) return null;
-  const amps = new Array(MAX_HARMONICS).fill(0);
-  for (let i = 0; i < MAX_HARMONICS && i < a.analysis.amps.length; i++) { const v = Number(a.analysis.amps[i]); amps[i] = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0; }
-  if (!amps.some((v) => v > 0)) return null;
+  const analysis = cleanAnalysis(a.analysis);
+  if (!analysis) return null;
   const angles = a.angles && Number.isFinite(+a.angles.bend) && Number.isFinite(+a.angles.lift) ? { bend: +a.angles.bend, lift: +a.angles.lift } : null;
   const pos = a.pos && Number.isFinite(+a.pos.x) && Number.isFinite(+a.pos.y) ? { x: clamp01(+a.pos.x), y: clamp01(+a.pos.y) } : null;
   if (!angles && !pos) return null;
   const source = ['starter', 'recorded', 'vowel-morph'].includes(a.source) ? a.source : 'recorded';
   const placedBy = ['pose', 'click'].includes(a.placedBy) ? a.placedBy : 'pose';
-  const sm = a.analysis.summary && typeof a.analysis.summary === 'object' ? a.analysis.summary : null;
   return {
     id: String(a.id || `pm-${Math.random().toString(36).slice(2, 10)}`),
     name: String(a.name || 'Sound').slice(0, 40),
@@ -343,7 +439,7 @@ export function cleanAnchor(a) {
     angles: source === 'starter' && pos ? null : angles,
     placedBy,
     recordingId: a.recordingId ? String(a.recordingId) : null,
-    analysis: { status: a.analysis.status === 'warning' ? 'warning' : 'ok', f0, amps, ...(sm ? { summary: JSON.parse(JSON.stringify(sm)) } : {}) },
+    analysis,
   };
 }
 
@@ -403,6 +499,7 @@ export function loadProject(raw) {
   const rng = (r, d) => (r && Number.isFinite(+r.lo) && Number.isFinite(+r.hi) && +r.hi - +r.lo >= MIN_SPAN - 1e-9 ? { lo: +r.lo, hi: +r.hi } : { ...d });
   p.cal = { bend: rng(c.bend, DEFAULT_CAL.bend), lift: rng(c.lift, DEFAULT_CAL.lift) };
   p.calSource = ['default', 'adjusted', 'custom'].includes(raw.calSource) ? raw.calSource : 'default';
+  if (raw.migratedFrom && typeof raw.migratedFrom === 'object') p.migratedFrom = JSON.parse(JSON.stringify(raw.migratedFrom));
   // Older projects kept sounds as "anchors", including automatic starter vowels; starters are dropped.
   const list = Array.isArray(raw.sounds) ? raw.sounds : Array.isArray(raw.anchors) ? raw.anchors.filter((a) => a && a.source !== 'starter') : [];
   p.sounds = list.map((x) => cleanSound(x, p.cal)).filter(Boolean);
@@ -411,6 +508,31 @@ export function loadProject(raw) {
   const r = cl.region || {};
   p.clap = { on: cl.on === true, region: { x: clamp01(Number.isFinite(+r.x) ? +r.x : 0.9), y: clamp01(Number.isFinite(+r.y) ? +r.y : 0.9), r: Math.min(0.4, Math.max(0.05, Number(r.r) || 0.16)) } };
   p.power = [1, 2, 4].includes(raw.power) ? raw.power : 2;
+  if (!(Number(raw.version) >= 4) && (p.sounds.length || p.takes.length || raw.cal)) migrateToV4(p);
+  return p;
+}
+
+/**
+ * One-time update of maps saved before version 4 (November 23, 2026). Their
+ * poses were measured without the depth correction (elbowBend) and against
+ * the old range, so the stored angles no longer describe the same arm
+ * position. The map itself is kept: every sound and take stays at the map
+ * position it had, its angles are re-derived for the new default range, and
+ * the range goes back to the (new) default. The page keeps a backup of the
+ * old map before saving. Recordings (audio) are not touched.
+ */
+export function migrateToV4(p) {
+  const oldCal = p.cal;
+  const newCal = JSON.parse(JSON.stringify(DEFAULT_CAL));
+  const move = (a) => { const q = pointToAngles(anglesToPoint(a, oldCal), newCal); return { bend: r1(q.bend), lift: r1(q.lift) }; };
+  for (const s of p.sounds) if (s.place) s.place = { ...s.place, angles: move(s.place.angles) };
+  for (const t of p.takes) {
+    t.path = t.path.map((q) => ({ ...q, ...move(q) }));
+    t.points = t.points.map((q) => ({ ...q, ...move(q) }));
+  }
+  p.migratedFrom = { version: 3, cal: oldCal, at: new Date().toISOString() };
+  p.cal = newCal;
+  p.calSource = 'default';
   return p;
 }
 
