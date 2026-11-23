@@ -254,6 +254,9 @@ export function mount(root) {
   const harmBars = new HarmonicBars(harmCanvas);
   const powerSel = h('select', { 'aria-label': 'Distance influence', onchange: () => { project.power = Number(powerSel.value); save(); } },
     POWERS.map((x) => h('option', { value: String(x.p), selected: project.power === x.p || null }, `${x.name} (power ${x.p})`)));
+  const blendSel = h('select', { class: 'pm-blend-mode', 'aria-label': 'How a vowel and a fricative mix', onchange: () => { project.blendMode = blendSel.value; save(); } },
+    h('option', { value: 'morph', selected: project.blendMode !== 'layer' || null }, 'Morph: one shared spectrum (default)'),
+    h('option', { value: 'layer', selected: project.blendMode === 'layer' || null }, 'Layer: vowel part + hiss part'));
   const clapChk = h('input', { type: 'checkbox', checked: project.clap.on, onchange: () => setClap(clapChk.checked) });
   const clapHere = h('button', { class: 'btn small', onclick: () => { project.clap.region.x = st.dot.x; project.clap.region.y = st.dot.y; clap.prime(st.dot, project.clap.region); save(); renderMap(); } }, 'Use my current pose as the clap region');
   const clapOut = h('div', { class: 'pm-clap-flash', 'aria-live': 'polite' });
@@ -300,7 +303,8 @@ export function mount(root) {
     h('div', { class: 'muted pm-sub' }, 'Harmonic strengths of the synthesized tone (dB; harmonic number below)'),
     harmCanvas,
     noiseBox,
-    h('div', { class: 'row gap wrap pm-sound-opts' }, h('label', { class: 'row gap' }, 'Distance influence', powerSel)),
+    h('div', { class: 'row gap wrap pm-sound-opts' }, h('label', { class: 'row gap' }, 'Distance influence', powerSel), h('label', { class: 'row gap' }, 'Vowel ↔ fricative', blendSel)),
+    h('p', { class: 'help pm-blend-help' }, 'Morph: between a vowel and a fricative, both parts are shaped by ONE spectrum that glides from the vowel’s formants to the hiss’s shape, while the voiced share falls and the noise share rises; half-way you hear one breathy, buzzy sound. Layer: the vowel’s own harmonics and the fricative’s own hiss are mixed side by side, which can sound like two sounds at lower volume.'),
     clapCard);
   const libraryCard = h('section', { class: 'card pm-sounds' },
     h('h2', {}, 'Your recordings'),
@@ -871,7 +875,7 @@ export function mount(root) {
     for (const t of project.takes) {
       if (t.hidden) continue;
       const pts = t.points.map((q) => ({ pos: anglesToPoint(q, project.cal), params: soundParams(q), t: q.t, kind: q.kind })).filter((q) => q.params);
-      const ts = takeSource(pts, here);
+      const ts = takeSource(pts, here, { mode: project.blendMode });
       if (!ts) continue;
       const A = pts[ts.i];
       const B = pts[Math.min(ts.i + 1, pts.length - 1)];
@@ -894,7 +898,7 @@ export function mount(root) {
     if (!sources.length) return { contributions: [], params: null };
     const w = idwWeights(sources.map((x) => x.pos), point, project.power);
     const contributions = sources.map((x, i) => ({ source: x, weight: w[i], kind: x.params.kind, voiced: x.params.voiced, pitched: w[i] * x.params.voiced, noise: w[i] * (1 - x.params.voiced) }));
-    const params = blendSounds(sources.map((x, i) => ({ params: x.params, weight: w[i] })));
+    const params = blendSounds(sources.map((x, i) => ({ params: x.params, weight: w[i] })), { mode: project.blendMode });
     return { contributions, params };
   }
 
@@ -1316,7 +1320,9 @@ export function mount(root) {
         f0Out.replaceChildren(h('span', { class: 'muted' }, playing ? 'Synthesizer now: ' : 'Here (sound off): '),
           hasPitch ? h('span', {}, h('b', {}, `${p.f0.toFixed(1)} Hz`), ` ${noteName(p.f0)}`) : h('b', {}, 'no pitch (noise only)'));
         const gains = partGains(p);
-        mixOut.textContent = hasNoise
+        mixOut.textContent = hasNoise && hasPitch && p.mode === 'morph'
+          ? `One synthesized sound with ONE spectral shape (your sounds’ shapes averaged by the shares above): ${pct(pitchedShare)} of it voiced (harmonics of f0), ${pct(p.noise)} breath noise, both through that same shape. Gains ${gains.harm.toFixed(2)} and ${gains.noise.toFixed(2)}.`
+          : hasNoise
           ? `One synthesized sound: ${pct(pitchedShare)} pitched part (f0 and harmonics from your pitched sounds only) + ${pct(p.noise)} noise part (from your fricatives). Played at gains ${gains.harm.toFixed(2)} and ${gains.noise.toFixed(2)} (equal-power mix).`
           : 'One synthesized sound: f0 and harmonic strengths mixed from your pitched sounds by the shares above.';
         const kindTag = (g) => (g.kind === 'noise' ? 'noise' : g.kind === 'mixed' ? `pitched ${pct(g.voiced)} + noise ${pct(1 - g.voiced)}` : 'pitched');
@@ -1343,7 +1349,7 @@ export function mount(root) {
           h('div', { class: 'muted pm-sub' }, 'Resulting levels in the synthesizer'),
           lv('Pitched (harmonic) part', pitchedShare, gains.harm, 'harm'),
           lv('Noise part', p.noise || 0, gains.noise, 'noise'),
-          out && out.rmsDb > -70 ? h('div', { class: 'muted pm-measured' }, `Measured at the output just now: ${pct(out.tonalShare)} of the energy sits on the harmonics of f0, ${pct(1 - out.tonalShare)} is noise between them (level ${out.rmsDb.toFixed(0)} dBFS).`) : null);
+          out && out.rmsDb > -70 ? h('div', { class: 'muted pm-measured' }, `Measured at the output just now: ${pct(out.tonalShare)} of the energy sits on the harmonics of f0, ${pct(1 - out.tonalShare)} is noise between them (level ${out.rmsDb.toFixed(0)} dBFS).${out.tonalShare > 0.05 && out.tonalShare < 0.95 && Number.isFinite(out.tonalCentreHz) && Number.isFinite(out.noiseCentreHz) ? ` The voiced part is centred near ${fmtHz(out.tonalCentreHz)}, the noise part near ${fmtHz(out.noiseCentreHz)}.` : ''}`) : null);
         harmBars.set(hasPitch ? { amps: p.amps } : { amps: null, empty: 'No pitched part here' });
         noiseBox.hidden = !hasNoise;
         if (p.bands) drawBands(noiseCanvas, p.bands);

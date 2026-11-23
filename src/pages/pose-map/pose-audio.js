@@ -13,7 +13,7 @@
 // last frequency at gain 0; no pitch is invented.
 import { MorphAudio, SMOOTH_SEC } from '../vowel-morph/morph-audio.js';
 import { noiseLoop } from '../frequency/vowel-filter.js';
-import { NOISE_BANDS, noiseFilterTargets, partGains } from './pose-sound.js';
+import { NOISE_BANDS, noiseFilterTargets, partGains, BAND_CENTERS, BAND_EDGES } from './pose-sound.js';
 import { HARMONICS } from '../vowel-morph/morph-model.js';
 
 const FADE_IN = 0.03;
@@ -61,20 +61,34 @@ export class PoseAudio extends MorphAudio {
       const c = Math.round((k * f0) / binHz);
       for (let j = c - 4; j <= c + 4; j++) if (j >= lo && j <= hi) harmBin[j] = 1;
     }
-    let onH = 0; let offH = 0; let nOn = 0; let nOff = 0; let high = 0; let total = 0; let cen = 0;
-    for (let i = lo; i <= hi; i++) {
-      const p = Number.isFinite(db[i]) ? 10 ** (db[i] / 10) : 0;
-      total += p; cen += p * i * binHz;
-      if (i * binHz >= 2000) high += p;
-      if (harmBin[i]) { onH += p; nOn++; } else { offH += p; nOff++; }
+    // per noise band (24 bands, 200 Hz–12 kHz): power on the harmonics vs between them;
+    // the noise under the harmonic bins is estimated from the band's other bins and removed
+    const tonalB = new Float64Array(BAND_CENTERS.length);
+    const noiseB = new Float64Array(BAND_CENTERS.length);
+    let total = 0; let high = 0; let cen = 0;
+    for (let b = 0; b < BAND_CENTERS.length; b++) {
+      let on = 0; let off = 0; let nOn = 0; let nOff = 0;
+      for (let i = Math.max(lo, Math.ceil(BAND_EDGES[b] / binHz)); i < Math.min(hi + 1, Math.ceil(BAND_EDGES[b + 1] / binHz)); i++) {
+        const p = Number.isFinite(db[i]) ? 10 ** (db[i] / 10) : 0;
+        total += p; cen += p * i * binHz;
+        if (i * binHz >= 2000) high += p;
+        if (harmBin[i]) { on += p; nOn++; } else { off += p; nOff++; }
+      }
+      const floor = nOff ? off / nOff : 0;
+      tonalB[b] = Math.max(0, on - floor * nOn);
+      noiseB[b] = off + floor * nOn;
     }
-    const floor = nOff ? offH / nOff : 0;
-    const tonal = Math.max(0, onH - floor * nOn);
+    const tonal = tonalB.reduce((x, y) => x + y, 0);
+    const noiseSum = noiseB.reduce((x, y) => x + y, 0);
+    // log-frequency centre of each part: where its energy sits
+    const logCentre = (pw) => { const t = pw.reduce((x, y) => x + y, 0); return t > 0 ? Math.exp(pw.reduce((acc, p, b) => acc + p * Math.log(BAND_CENTERS[b]), 0) / t) : NaN; };
     return {
       rmsDb: rms > 0 ? 20 * Math.log10(rms) : -Infinity,
-      tonalShare: total > 0 ? Math.min(1, tonal / total) : 0,
+      tonalShare: tonal + noiseSum > 0 ? Math.min(1, tonal / (tonal + noiseSum)) : 0,
       highShare: total > 0 ? high / total : 0,
       centroidHz: total > 0 ? cen / total : 0,
+      tonalCentreHz: logCentre(tonalB),
+      noiseCentreHz: logCentre(noiseB),
       f0,
     };
   }

@@ -149,7 +149,7 @@ export function cleanBands(b) {
  *   { f0 (NaN when no pitched sound contributes), amps, harm: H, noise: N, bands }
  * See the header for the rules. null when nothing is playable.
  */
-export function blendSounds(items) {
+export function blendSounds(items, { mode = 'layer', sampleRate = 48000 } = {}) {
   const list = items.filter((it) => it && it.params && it.weight > 0);
   const total = list.reduce((s, it) => s + it.weight, 0);
   if (!list.length || !(total > 0)) return null;
@@ -180,7 +180,97 @@ export function blendSounds(items) {
     bands = new Array(NOISE_BANDS).fill(0);
     list.forEach((it, i) => { if (!nw[i]) return; const w = nw[i] / nh; for (let b = 0; b < NOISE_BANDS; b++) bands[b] += w * it.params.bands[b]; });
   }
-  return { f0, amps: amps.map((a) => Math.min(1, a)), harm: H, noise: N, bands };
+  if (mode === 'morph' && ph > 0 && nh > 0) {
+    // Shared spectral shapes: each part's shape is every source's shape averaged in dB by the
+    // source's FULL weight. A source lends its own shape for that part when it has one (a vowel's
+    // harmonics, a fricative's noise), otherwise its other part's shape. So between a vowel and a
+    // fricative both parts get the SAME in-between shape, while a single "zzz" keeps its own two.
+    const parts = list.map((it) => { const e = partCurves(it.params); return { w: it.weight / total, h: e.harm || e.noise, n: e.noise || e.harm }; });
+    const shapeH = (f) => parts.reduce((acc, q) => acc + q.w * q.h(f), 0);
+    const shapeN = (f) => parts.reduce((acc, q) => acc + q.w * q.n(f), 0);
+    const env = ENV_FREQS.map(shapeH);
+    const mAmps = new Array(MAX_HARMONICS).fill(0);
+    for (let n = 1; n <= MAX_HARMONICS; n++) if (n * f0 < sampleRate / 2) mAmps[n - 1] = 10 ** (shapeH(n * f0) / 20);
+    const peakA = Math.max(...mAmps);
+    const mBands = BAND_CENTERS.map((c) => 10 ** (shapeN(c) / 20));
+    const peakB = Math.max(...mBands);
+    return { f0, amps: mAmps.map((a) => (peakA > 0 ? a / peakA : 0)), harm: H, noise: N, bands: mBands.map((b) => (peakB > 0 ? b / peakB : 0)), mode: 'morph', envelope: Array.from(env) };
+  }
+  return { f0, amps: amps.map((a) => Math.min(1, a)), harm: H, noise: N, bands, mode: 'layer' };
+}
+
+// ── shared spectral envelope (for 'morph' blending) ──
+// A source-filter view: every sound has one spectral shape (its envelope, in
+// dB re its peak) on a common log-frequency grid. A pitched sound's shape is
+// drawn through its harmonic strengths at n·f0, a noise sound's through its
+// band levels, a mixed sound's is the power sum of the two. Blending averages
+// the shapes in dB; then the harmonic part is sampled from that ONE shape at
+// n·f0 and the noise part at the band centres, so both parts share one timbre
+// that glides from the vowel's formants to the fricative's hiss.
+export const ENV_FLOOR_DB = -60;
+export const ENV_FREQS = Object.freeze(Array.from({ length: 96 }, (_, k) => 60 * (14000 / 60) ** (k / 95)));
+const LOG_ENV = ENV_FREQS.map(Math.log);
+
+function interpLog(xs, ys, f) {
+  const lf = Math.log(f);
+  if (lf <= xs[0]) return ys[0];
+  if (lf >= xs[xs.length - 1]) return ys[ys.length - 1];
+  let i = 0;
+  while (i < xs.length - 2 && lf > xs[i + 1]) i++;
+  const u = (lf - xs[i]) / (xs[i + 1] - xs[i]);
+  return ys[i] + u * (ys[i + 1] - ys[i]);
+}
+const toDb = (a) => Math.max(ENV_FLOOR_DB, a > 0 ? 20 * Math.log10(a) : ENV_FLOOR_DB);
+
+/** Each part's own shape as a function of frequency (dB re that part's peak): { harm, noise }, null where absent. */
+export function partCurves(p) {
+  const v = p.voiced != null ? p.voiced : p.kind === 'noise' ? 0 : 1;
+  const curve = (xs, ys) => { const pk = Math.max(...ys); return (f) => interpLog(xs, ys, f) - pk; };
+  const harm = v > 0 && Number.isFinite(p.f0) && p.f0 > 0 ? curve(p.amps.map((_, i) => Math.log((i + 1) * p.f0)), p.amps.map(toDb)) : null;
+  const noise = v < 1 && p.bands ? curve(BAND_CENTERS.map(Math.log), p.bands.map(toDb)) : null;
+  return { harm, noise };
+}
+
+/** Each part's own envelope (dB on ENV_FREQS, peak 0 dB): { harm, noise }, null where the sound has no such part. */
+export function envelopeParts(p) {
+  const v = p.voiced != null ? p.voiced : p.kind === 'noise' ? 0 : 1;
+  const norm = (e) => { const pk = Math.max(...e); return e.map((x) => Math.max(ENV_FLOOR_DB, x - pk)); };
+  let harm = null;
+  if (v > 0 && Number.isFinite(p.f0) && p.f0 > 0) {
+    const xs = []; const ys = [];
+    p.amps.forEach((a, i) => { xs.push(Math.log((i + 1) * p.f0)); ys.push(toDb(a)); });
+    harm = norm(ENV_FREQS.map((f) => interpLog(xs, ys, f)));
+  }
+  let noise = null;
+  if (v < 1 && p.bands) noise = norm(ENV_FREQS.map((f) => interpLog(BAND_CENTERS.map(Math.log), p.bands.map(toDb), f)));
+  return { harm, noise };
+}
+
+/** One overall envelope (dB on ENV_FREQS) of a sound: the power sum of its parts; peak at 0 dB. */
+export function envelopeOf(p) {
+  const v = p.voiced != null ? p.voiced : p.kind === 'noise' ? 0 : 1;
+  let harm = null;
+  if (v > 0 && Number.isFinite(p.f0) && p.f0 > 0) {
+    const xs = []; const ys = [];
+    p.amps.forEach((a, i) => { xs.push(Math.log((i + 1) * p.f0)); ys.push(toDb(a)); });
+    harm = ENV_FREQS.map((f) => interpLog(xs, ys, f));
+  }
+  let noise = null;
+  if (v < 1 && p.bands) {
+    const xs = BAND_CENTERS.map(Math.log);
+    const ys = p.bands.map(toDb);
+    noise = ENV_FREQS.map((f) => interpLog(xs, ys, f));
+  }
+  let e;
+  if (harm && noise) e = harm.map((h, k) => 10 * Math.log10(v * 10 ** (h / 10) + (1 - v) * 10 ** (noise[k] / 10)));
+  else e = harm || noise || ENV_FREQS.map(() => ENV_FLOOR_DB);
+  const peak = Math.max(...e);
+  return e.map((x) => Math.max(ENV_FLOOR_DB, x - peak));
+}
+
+/** The envelope's level (dB) at frequency f. */
+export function sampleEnvelope(env, f) {
+  return interpLog(LOG_ENV, env, f);
 }
 
 /** A blend result as parameters again (so a take's interpolated point can enter the map blend). */
@@ -203,7 +293,7 @@ export function asParams(b) {
  * outweigh a single recorded sound.
  * Returns { pos, params, i, u, distance } (i = index of the segment start, u = 0…1 along it).
  */
-export function takeSource(points, here) {
+export function takeSource(points, here, opts = {}) {
   const pts = points.filter((p) => p && p.pos && p.params);
   if (!pts.length) return null;
   if (pts.length === 1) return { pos: { ...pts[0].pos }, params: pts[0].params, i: 0, u: 0, distance: Math.hypot(pts[0].pos.x - here.x, pts[0].pos.y - here.y) };
@@ -218,7 +308,7 @@ export function takeSource(points, here) {
     if (!best || d < best.distance - 1e-12) best = { pos: q, i, u, distance: d };
   }
   const A = pts[best.i].params; const B = pts[best.i + 1].params;
-  best.params = best.u <= 1e-9 ? A : best.u >= 1 - 1e-9 ? B : asParams(blendSounds([{ params: A, weight: 1 - best.u }, { params: B, weight: best.u }]));
+  best.params = best.u <= 1e-9 ? A : best.u >= 1 - 1e-9 ? B : asParams(blendSounds([{ params: A, weight: 1 - best.u }, { params: B, weight: best.u }], opts));
   return best;
 }
 

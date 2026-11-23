@@ -634,6 +634,19 @@ check('Pitched and noise levels are shown (shares and gains)', /Pitched \(harmon
 check('MEASURED output: at the vowel the energy sits on the harmonics of f0, on the line it is noise, in between it is in between',
   ton[0] > 0.85 && ton[8] < 0.15 && ton[4] > ton[8] + 0.1 && ton[4] < ton[0] - 0.1 && out[8].highShare > 0.6 && out[0].rmsDb > -40 && out[8].rmsDb > -40,
   ton.map((v) => (Number.isFinite(v) ? `${(v * 100).toFixed(0)}%` : '—')).join(' → ') + ` tonal; line high-freq share ${out[8] && (out[8].highShare * 100).toFixed(0)} %; levels ${out.map((o) => o && o.rmsDb.toFixed(0)).join('/')} dBFS`);
+const oct = (o) => Math.abs(Math.log2(o.tonalCentreHz / o.noiseCentreHz));
+check('Morph (default): half-way, the voiced and noise parts come out with ONE shared spectral shape (centred within an octave of each other)', walk[4].blend.params.mode === 'morph' && oct(out[4]) < 1,
+  `voiced part centred ${out[4].tonalCentreHz.toFixed(0)} Hz, noise part ${out[4].noiseCentreHz.toFixed(0)} Hz`);
+const cen = out.map((o) => o.centroidHz);
+check('Morph: the overall timbre glides from the vowel to the hiss (spectral centre rises step by step)', cen.every((c, i) => i === 0 || c >= cen[i - 1] * 0.97) && cen[8] > cen[0] * 3, cen.map((c) => c.toFixed(0)).join(' → ') + ' Hz');
+await pose({ bend: ahPose.bend + 0.5 * (lineBend - ahPose.bend), lift: ahPose.lift });
+await page.locator('.pm-blend-mode').selectOption('layer');
+await wait(900);
+const lay = await dbg();
+check('Layer (the previous behaviour, still selectable): half-way the vowel’s harmonics and the hiss stay apart, like two sounds', lay.blend.params.mode === 'layer' && oct(lay.audio.output) > 1.5,
+  `voiced part centred ${lay.audio.output.tonalCentreHz.toFixed(0)} Hz, noise part ${lay.audio.output.noiseCentreHz.toFixed(0)} Hz`);
+await page.locator('.pm-blend-mode').selectOption('morph');
+await wait(300);
 // how much the line would have weighed with every dot counted on its own (the old way)
 const toP = (a) => ({ x: (a.bend - cal4.bend.lo) / (cal4.bend.hi - cal4.bend.lo), y: (a.lift - cal4.lift.lo) / (cal4.lift.hi - cal4.lift.lo) });
 const here4 = toP({ bend: ahPose.bend + 0.5 * (lineBend - ahPose.bend), lift: ahPose.lift });

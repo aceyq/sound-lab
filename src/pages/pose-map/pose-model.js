@@ -368,7 +368,7 @@ export const PROJECT_KEY = 'poseMap.project.v1';
 // "Clear map" takes everything off the map but keeps the library, so any
 // recording can be placed again; deleting a recording is a separate action.
 export function emptyProject() {
-  return { version: 4, sounds: [], takes: [], cal: JSON.parse(JSON.stringify(DEFAULT_CAL)), calSource: 'default', clap: { on: false, region: { x: 0.9, y: 0.9, r: 0.16 } }, power: 2 };
+  return { version: 4, sounds: [], takes: [], cal: JSON.parse(JSON.stringify(DEFAULT_CAL)), calSource: 'default', clap: { on: false, region: { x: 0.9, y: 0.9, r: 0.16 } }, power: 2, blendMode: 'morph' };
 }
 
 /** A clean library sound (null if it has no playable analysis). */
@@ -532,6 +532,8 @@ export function loadProject(raw) {
   const r = cl.region || {};
   p.clap = { on: cl.on === true, region: { x: clamp01(Number.isFinite(+r.x) ? +r.x : 0.9), y: clamp01(Number.isFinite(+r.y) ? +r.y : 0.9), r: Math.min(0.4, Math.max(0.05, Number(r.r) || 0.16)) } };
   p.power = [1, 2, 4].includes(raw.power) ? raw.power : 2;
+  // how a vowel and a fricative mix: 'morph' = one shared spectral shape (default), 'layer' = the two parts side by side
+  p.blendMode = raw.blendMode === 'layer' ? 'layer' : 'morph';
   if (!(Number(raw.version) >= 4) && (p.sounds.length || p.takes.length || raw.cal)) migrateToV4(p);
   return p;
 }

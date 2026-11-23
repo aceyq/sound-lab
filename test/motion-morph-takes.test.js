@@ -173,3 +173,46 @@ test('noise and mixed take points survive takeToAngles and loading; positions fo
   assert.equal(back.analysisVersion, 2);
   assert.equal(back.startOffsetMs, 0);
 });
+
+// ── morph blending: one shared spectral shape between a vowel and a fricative ──
+import { envelopeParts, sampleEnvelope, BAND_CENTERS } from '../src/pages/pose-map/pose-sound.js';
+const AH = soundParams({ kind: 'pitched', f0: 196, amps: Array.from({ length: 48 }, (_, i) => (i < 5 ? [0.5, 0.8, 1, 0.9, 0.5][i] : 0.3 / (i + 1))) });
+const SSS = soundParams({ kind: 'noise', noise: { bands: Array.from({ length: NOISE_BANDS }, (_, i) => (i > 17 ? 1 : 0.02)) } });
+const dbCentroid = (vals, freqs) => { let s = 0; let w = 0; vals.forEach((a, i) => { s += a * a * freqs[i]; w += a * a; }); return s / w; };
+
+test('morph: endpoints are the sounds themselves; half-way both parts share ONE in-between shape', () => {
+  const at = (wN) => blendSounds([{ params: AH, weight: 1 - wN }, { params: SSS, weight: wN }], { mode: 'morph' });
+  const near0 = at(1e-6);
+  assert.equal(near0.mode, 'morph');
+  for (let n = 0; n < 10; n++) assert.ok(Math.abs(near0.amps[n] - AH.amps[n]) < 0.01, `harmonic ${n + 1}`);
+  const near1 = at(1 - 1e-6);
+  for (let b = 0; b < NOISE_BANDS; b++) assert.ok(Math.abs(near1.bands[b] - SSS.bands[b]) < 0.01, `band ${b}`);
+  const mid = at(0.5);
+  // compare the two parts' shapes at the same frequencies (dB, overall offset removed)
+  const shapeGap = (bl) => {
+    const d = BAND_CENTERS.filter((c) => c > 250 && c < 9000).map((c) => {
+      const n = Math.max(1, Math.round(c / 196));
+      return 20 * Math.log10(Math.max(1e-3, bl.amps[n - 1])) - 20 * Math.log10(Math.max(1e-3, bl.bands[BAND_CENTERS.indexOf(c)]));
+    });
+    const m = d.reduce((x, y) => x + y, 0) / d.length;
+    return d.reduce((x, y) => x + Math.abs(y - m), 0) / d.length;
+  };
+  const layer = blendSounds([{ params: AH, weight: 0.5 }, { params: SSS, weight: 0.5 }]);
+  assert.ok(shapeGap(mid) < 2.5, `morph: parts differ by ${shapeGap(mid).toFixed(1)} dB on average`);
+  assert.ok(shapeGap(layer) > 10, `layer: parts differ by ${shapeGap(layer).toFixed(1)} dB (two different sounds)`);
+  // the shape glides: its centre rises steadily from the vowel's to the hiss's
+  const cs = [0.1, 0.3, 0.5, 0.7, 0.9].map((w) => { const b = at(w); return dbCentroid(b.bands, BAND_CENTERS); });
+  for (let i = 1; i < cs.length; i++) assert.ok(cs[i] > cs[i - 1], cs.map((c) => c.toFixed(0)).join(' '));
+  assert.ok(close(mid.f0, 196) && close(mid.harm, 0.5) && close(mid.noise, 0.5), 'pitch and part shares as before');
+});
+
+test('morph leaves vowel ↔ vowel blends and a single mixed sound as they were', () => {
+  const EE = soundParams({ kind: 'pitched', f0: 300, amps: [0.2, 1] });
+  assert.deepEqual(blendSounds([{ params: AH, weight: 0.5 }, { params: EE, weight: 0.5 }], { mode: 'morph' }).amps, blendSounds([{ params: AH, weight: 0.5 }, { params: EE, weight: 0.5 }]).amps);
+  const Z = soundParams({ kind: 'mixed', voiced: 0.6, f0: 150, amps: [1, 0.5, 0.25], noise: { bands: SSS.bands } });
+  const one = blendSounds([{ params: Z, weight: 1 }], { mode: 'morph' });
+  for (let n = 0; n < 3; n++) assert.ok(Math.abs(one.amps[n] - Z.amps[n]) < 0.01);
+  for (let b = 0; b < NOISE_BANDS; b++) assert.ok(Math.abs(one.bands[b] - SSS.bands[b]) < 0.01);
+  const e = envelopeParts(AH);
+  assert.ok(e.harm && !e.noise && Math.abs(sampleEnvelope(e.harm, 3 * 196)) < 0.1);
+});

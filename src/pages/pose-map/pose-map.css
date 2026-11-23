@@ -173,3 +173,5 @@
 .pm-level.noise .pm-wbar span { background: #c3a6ff; }
 .pm-measured { font-size: 0.85em; margin-top: 2px; }
 @media (max-width: 520px) { .pm-level { grid-template-columns: 1fr; } .pm-wtable th:nth-child(5), .pm-wtable td:nth-child(5) { display: none; } }
+.pm-sound-opts label { flex-wrap: wrap; max-width: 100%; min-width: 0; }
+.pm-sound-opts select { max-width: 100%; min-width: 0; }

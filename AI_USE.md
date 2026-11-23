@@ -3253,6 +3253,30 @@ What I still need to check myself, by listening:
 - How are my real "zzz" or breathy vowels classified? The voiced-fricative detection was only tested on generated signals, because the fake microphone in the browser test cannot hum and hiss at once.
 - Does a quiet hiss under a loud vowel stay a plain vowel? The noise has to be about a third of the energy between the harmonics before it is kept.
 
+### Motion Morph follow-up: one sound between a vowel and a fricative
+
+What I told Claude after listening (my own words, not drafted with ChatGPT):
+
+```text
+hmmm i can hear the fricative involved now but it doesn't seem like a right blend, it seems more like just playing the two sound but at half volume for both?
+```
+
+Why it sounded like that: the synthesizer did mix parameters, not recordings, but it kept each part's own timbre. Half-way, the harmonics still had the vowel's spectrum and the noise still had the hiss's spectrum, each at about −3 dB. That is a reconstructed vowel and a reconstructed hiss played side by side, which is what I heard.
+
+What changed:
+- **Morph (new default).** Between a vowel and a fricative, both parts now share one spectral shape: each sound's shape (its harmonic strengths, or its noise bands) is averaged in dB by its weight on the map. The harmonics are taken from that shape at multiples of f0, and the noise bands from the same shape. So the timbre glides from the vowel's formants to the hiss's shape while the voiced share falls and the noise share rises. Half-way it is one breathy, buzzy sound. At a dot you still hear exactly that sound, and vowel-to-vowel blends are unchanged.
+- **Layer (the old behaviour)** can still be chosen under "Vowel ↔ fricative", to compare.
+- The output meter also says where the voiced part and the noise part are centred, and the tour mentions the choice.
+
+Limits Claude pointed out: there is no physical sound "between" an "ah" and a "shh". This is a source-filter style morph (a buzz and a hiss through one moving filter), not a model of the tongue moving. The shape is only known at the harmonics of f0 and in 24 noise bands, so fine detail is smoothed.
+
+What Claude tested, all simulated: 204 unit tests and the build pass, and the browser script passed 100 of 100 checks.
+- Measured at the synthesizer's output half-way between "ah" and the "sss" line, the voiced part was centred near 1375 Hz and the noise part near 1865 Hz, so they share one shape. With Layer they were at 671 Hz and 6307 Hz, two separate sounds.
+- Walking from the vowel to the line, the overall spectral centre rose 678 → 721 → 884 → 1267 → 2433 → 6333 → 6791 → 6912 → 6852 Hz, at a steady level.
+- Unit tests check that the endpoints are the original sounds, that a single "zzz" keeps its own two parts, and that vowel-to-vowel blends did not change.
+
+What I still need to do: listen to whether the middle now sounds like one sound, and compare it with Layer.
+
 ### My own testing
 
 To confirm: recording and drawing with my own voice and microphone, listening to the blends, and trying the pose map (right elbow bend and left arm lift) with my own body in front of my laptop camera. For Motion Morph, also: starting from the empty map, recording "ah" and "ee" and placing one by clicking and one by pose, checking that bending only my right elbow moves the marker sideways and lifting only my left arm moves it up (with the mirrored preview), using Clear map and placing a recording again, recording a hum and a vowel, holding a pose after the countdown from a few steps back, drawing a take while singing ah → ee → oo, playing everything with my arms, and running "Adjust to my movement" and checking that my saved poses still play the same sounds.
