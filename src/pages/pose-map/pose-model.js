@@ -276,8 +276,48 @@ export class RegionTrigger {
 
 export const PROJECT_KEY = 'poseMap.project.v1';
 
+// Version 3: the map starts EMPTY. Every sound comes from the person's own
+// recordings:
+//   sounds  the recording library: { id, name, source, audioId, analysis,
+//           createdAt, place } where place = { angles, placedBy } when the
+//           sound is on the map, or null when it is only in the library
+//   takes   drawn takes; `hidden` = in the library but not on the map
+// "Clear map" takes everything off the map but keeps the library, so any
+// recording can be placed again; deleting a recording is a separate action.
 export function emptyProject() {
-  return { version: 2, anchors: starterAnchors(), takes: [], useStarters: true, cal: JSON.parse(JSON.stringify(DEFAULT_CAL)), clap: { on: false, region: { x: 0.9, y: 0.9, r: 0.16 } }, power: 2 };
+  return { version: 3, sounds: [], takes: [], cal: JSON.parse(JSON.stringify(DEFAULT_CAL)), calSource: 'default', clap: { on: false, region: { x: 0.9, y: 0.9, r: 0.16 } }, power: 2 };
+}
+
+/** A clean library sound (null if it has no playable analysis). */
+export function cleanSound(x, cal = DEFAULT_CAL) {
+  const a = cleanAnchor(x);
+  if (!a && !(x && x.analysis)) return null;
+  const base = a || cleanAnchor({ ...x, pos: { x: 0, y: 0 } });
+  if (!base) return null;
+  let place = null;
+  const pl = x.place;
+  if (pl && pl.angles && Number.isFinite(+pl.angles.bend) && Number.isFinite(+pl.angles.lift)) place = { angles: { bend: +pl.angles.bend, lift: +pl.angles.lift }, placedBy: pl.placedBy === 'click' ? 'click' : 'pose' };
+  else if (x.place === undefined && base.angles) place = { angles: base.angles, placedBy: base.placedBy }; // v1/v2 anchor
+  else if (x.place === undefined && x.pos && a) place = { angles: pointToAngles(base.pos, cal), placedBy: 'click' };
+  return {
+    id: base.id, name: base.name, source: base.source === 'vowel-morph' ? 'vowel-morph' : 'recorded',
+    audioId: x.audioId ? String(x.audioId) : base.recordingId,
+    analysis: base.analysis, createdAt: x.createdAt || new Date(0).toISOString(), place,
+  };
+}
+
+/** The sounds that are on the map, as anchors blendAt() understands (pos through `cal`). */
+export function placedSounds(sounds, cal = DEFAULT_CAL) {
+  return (sounds || []).filter((s) => s.place).map((s) => ({ id: s.id, name: s.name, src: s, angles: s.place.angles, pos: anglesToPoint(s.place.angles, cal), analysis: s.analysis }));
+}
+
+/** Clear map: nothing stays on the map, every recording stays in the library. */
+export function clearMap(project) {
+  let sounds = 0;
+  let takes = 0;
+  for (const s of project.sounds) if (s.place) { s.place = null; sounds++; }
+  for (const t of project.takes) if (!t.hidden) { t.hidden = true; takes++; }
+  return { sounds, takes };
 }
 
 export function cleanAnchor(a) {
@@ -359,12 +399,14 @@ export function cleanPoseTake(t) {
 export function loadProject(raw) {
   const p = emptyProject();
   if (!raw || typeof raw !== 'object') return p;
-  if (Array.isArray(raw.anchors)) p.anchors = raw.anchors.map(cleanAnchor).filter(Boolean);
-  if (Array.isArray(raw.takes)) p.takes = raw.takes.map(cleanPoseTake).filter(Boolean);
-  p.useStarters = raw.useStarters !== false;
   const c = raw.cal || {};
   const rng = (r, d) => (r && Number.isFinite(+r.lo) && Number.isFinite(+r.hi) && +r.hi - +r.lo >= MIN_SPAN - 1e-9 ? { lo: +r.lo, hi: +r.hi } : { ...d });
   p.cal = { bend: rng(c.bend, DEFAULT_CAL.bend), lift: rng(c.lift, DEFAULT_CAL.lift) };
+  p.calSource = ['default', 'adjusted', 'custom'].includes(raw.calSource) ? raw.calSource : 'default';
+  // Older projects kept sounds as "anchors", including automatic starter vowels; starters are dropped.
+  const list = Array.isArray(raw.sounds) ? raw.sounds : Array.isArray(raw.anchors) ? raw.anchors.filter((a) => a && a.source !== 'starter') : [];
+  p.sounds = list.map((x) => cleanSound(x, p.cal)).filter(Boolean);
+  if (Array.isArray(raw.takes)) p.takes = raw.takes.map(cleanPoseTake).filter(Boolean);
   const cl = raw.clap || {};
   const r = cl.region || {};
   p.clap = { on: cl.on === true, region: { x: clamp01(Number.isFinite(+r.x) ? +r.x : 0.9), y: clamp01(Number.isFinite(+r.y) ? +r.y : 0.9), r: Math.min(0.4, Math.max(0.05, Number(r.r) || 0.16)) } };

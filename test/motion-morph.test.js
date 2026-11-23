@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_CAL, MIN_SPAN, estimateRange, scaleRange, setRangeEnd, percentPer10Deg, poseInRange, fixRange,
-  anglesToPoint, pointToAngles, anchorPoint, takeToAngles, poseTakeAnchors, loadProject, describePose, percentile,
+  anglesToPoint, pointToAngles, anchorPoint, takeToAngles, poseTakeAnchors, loadProject, describePose, percentile, placedSounds, clearMap,
 } from '../src/pages/pose-map/pose-model.js';
 import { analyzeMySound, steadySection } from '../src/pages/pose-map/sound-analysis.js';
 import { blendAt } from '../src/pages/vowel-morph/morph-model.js';
@@ -89,16 +89,51 @@ test('drawn takes are stored as poses and follow them through a new range', () =
   assert.equal(poseTakeAnchors([{ ...t, hidden: true }]).length, 0);
 });
 
-test('old projects load: recorded poses keep their angles, takes start empty, starters on', () => {
-  const p = loadProject({ version: 1, anchors: [{ id: 'a', name: 'Mine', source: 'recorded', angles: { bend: 50, lift: 40 }, analysis: { f0: 200, amps: [1] } }], cal: DEFAULT_CAL });
-  assert.equal(p.version, 2);
-  assert.deepEqual(p.anchors[0].angles, { bend: 50, lift: 40 });
-  assert.equal(p.anchors[0].pos, null);
+test('old projects load: recorded poses become placed sounds, starters are dropped', () => {
+  const p = loadProject({ version: 2, anchors: [
+    { id: 'a', name: 'Mine', source: 'recorded', angles: { bend: 50, lift: 40 }, analysis: { f0: 200, amps: [1] } },
+    { id: 'starter-ah', name: 'Starter “ah”', source: 'starter', pos: { x: 0.1, y: 0.1 }, analysis: { f0: 196, amps: [1] } },
+  ], cal: DEFAULT_CAL, useStarters: true });
+  assert.equal(p.version, 3);
+  assert.equal(p.sounds.length, 1);
+  assert.equal(p.sounds[0].name, 'Mine');
+  assert.deepEqual(p.sounds[0].place.angles, { bend: 50, lift: 40 });
   assert.deepEqual(p.takes, []);
-  assert.equal(p.useStarters, true);
-  const q = loadProject({ takes: [{ id: 'x', points: [{ bend: 30, lift: 40, f0: 200, amps: [1] }, { x: 1, y: 2, f0: 3, amps: [1] }], path: [] }], useStarters: false });
+  assert.equal('useStarters' in p, false);
+  const q = loadProject({ takes: [{ id: 'x', points: [{ bend: 30, lift: 40, f0: 200, amps: [1] }, { x: 1, y: 2, f0: 3, amps: [1] }], path: [] }] });
   assert.equal(q.takes[0].points.length, 1, 'malformed points are dropped');
-  assert.equal(q.useStarters, false);
+});
+
+test('library sounds: placed or not, placedSounds and clearMap', () => {
+  const p = loadProject({ sounds: [
+    { id: 's1', name: 'ah', source: 'recorded', audioId: 'r1', analysis: { f0: 196, amps: [1, 0.5] }, place: { angles: { bend: 15, lift: 15 }, placedBy: 'click' } },
+    { id: 's2', name: 'ee', source: 'recorded', audioId: 'r2', analysis: { f0: 220, amps: [1] }, place: null },
+  ], takes: [{ id: 't', name: 'Take 1', points: [{ bend: 30, lift: 40, f0: 200, amps: [1] }], path: [] }] });
+  assert.equal(p.sounds.length, 2);
+  assert.equal(p.sounds[1].place, null, 'an unplaced recording stays in the library');
+  const on = placedSounds(p.sounds, p.cal);
+  assert.deepEqual(on.map((s) => s.id), ['s1']);
+  assert.deepEqual(on[0].pos, { x: 0, y: 0 }, 'straight arm + arm down = bottom-left corner');
+  assert.equal(blendAt(on, { x: 0.7, y: 0.7 }).params.f0, 196);
+  const n = clearMap(p);
+  assert.deepEqual(n, { sounds: 1, takes: 1 });
+  assert.equal(placedSounds(p.sounds, p.cal).length, 0);
+  assert.equal(p.sounds.length, 2, 'Clear map keeps every recording');
+  assert.equal(p.takes.length, 1);
+  assert.equal(p.takes[0].hidden, true);
+  assert.equal(poseTakeAnchors(p.takes, p.cal).length, 0);
+  const again = loadProject(JSON.parse(JSON.stringify(p)));
+  assert.equal(again.sounds.every((s) => s.place === null), true, 'cleared state survives a reload');
+});
+
+test('axes: bending only the elbow moves x only, lifting only the left arm moves y only', () => {
+  const a = anglesToPoint({ bend: 40, lift: 50 });
+  const bendMore = anglesToPoint({ bend: 90, lift: 50 });
+  const liftMore = anglesToPoint({ bend: 40, lift: 100 });
+  const both = anglesToPoint({ bend: 90, lift: 100 });
+  assert.ok(bendMore.x > a.x && bendMore.y === a.y, 'more bent arm → right');
+  assert.ok(liftMore.y > a.y && liftMore.x === a.x, 'arm raised → up');
+  assert.ok(both.x > a.x && both.y > a.y, 'both → diagonal');
 });
 
 test('describePose puts the angles in words', () => {

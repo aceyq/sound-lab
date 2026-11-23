@@ -3035,6 +3035,79 @@ What Claude tested, all with simulated input (generated body landmarks fed throu
 - Tracking drops: a lost joint is named and fades the sound, and no camera frames fades it too. Losing the right elbow during "Use my pose" saved nothing and named the joint. Losing tracking during "Adjust" left the range unchanged and explained why.
 - Sounds, takes, range and original recordings survive a reload. The tour works with Back, Next, Done, Close and reopening, and the page has no sideways scrolling at phone width. The real pose model loads on Chromium's fake camera and tracks nothing, and Vowel Morph, Motion Score and Frequency Playground still open.
 
+### Motion Morph follow-up: empty map, guided recording and explicit axes
+
+Prompt (verbatim, sent November 23, 2026 UTC). ChatGPT helped me draft it:
+
+<details>
+<summary>Full prompt</summary>
+
+```text
+I’m exploring the updated Motion Morph, and a few things still need adjusting. I want the app to clearly show how I teach it sounds and then use two arm measurements to move between them.
+Start with an empty sound map. All the sounds should come from recordings I make, including individual vowels, humming, or a changing pitched sound I record while drawing. Please remove the automatically placed starter vowels. When the board is empty, show a short instruction that tells me how to add my first sound. Explain “learning” in terms of what the app actually does with my recordings.
+Add a clear-board option. I need an obvious Clear map button with a confirmation before it removes the placed sounds and drawn takes. Keep my recordings available so I can place them again. Give me a separate way to delete a recording if I want to.
+Make recording and placing a sound one guided process. Right now, I record something and then it’s confusing what I should click next. I want to click Add a sound, record, listen back, and then choose where it belongs. Show the steps and which one I’m on. Once the app has analyzed the recording, give me two clear choices:
+
+* Click a spot on the map. Put the map into placement mode and tell me to click where I want the sound. After I place it, label the dot and confirm that it’s ready to play.
+* Use my current pose. Give me a countdown so I can step back and hold a comfortable pose. Show where that pose lands on the map before I confirm it.
+
+If the recording can’t be analyzed, explain what happened and let me retry right there. Let me cancel placement or redo a position easily.
+Keep Draw + record as another clear option. I should be able to hold down the mouse, draw a line or shape, and sing changing vowels or other pitched sounds. Match each usable audio snippet to where my mouse was at that time. Afterward, show the learned points and let me preview the take, undo it, or play through it with my arms. Label these as synthesized sounds reconstructed from my recording.
+Please make the two axes really explicit. Last week, my professor was confused about what x and y meant, what each arm was changing, and how I moved between sounds. I need the app to make that easy to explain.
+Use these two measurements consistently:
+
+* Horizontal axis — right elbow bend. Measure the angle at my right elbow using my right shoulder, elbow, and wrist. Label which end is a straighter arm and which end is a more bent arm.
+* Vertical axis — left arm lift. Measure the angle between my left upper arm and my torso using my left hip, shoulder, and elbow. Label which end is arm down and which end is arm raised.
+
+Make the marker move in the directions those labels describe. Use my actual anatomical left and right, and make that clear even if the camera preview is mirrored. Highlight the relevant joints in the preview and match their colors to the axis labels.
+Beside the map, show the two measured angles in degrees and their corresponding map coordinates. When I bend only my right elbow, I should be able to see the marker move horizontally. When I lift only my left arm, it should move vertically. When I change both, it should move through both directions together.
+Explain what changes the sound at each position. Since I can put my own sounds anywhere, the axes describe my arm movements. The sounds I place determine what pitch and harmonic balance I hear there. Please make that relationship clear in the interface and tutorial. For example, I could place “ah” on the left and “ee” on the right, then bend my right elbow to move between them. I could put another sound higher up and lift my left arm to move toward it.
+Show the contribution percentages for my recorded sounds or drawn takes as I move. Keep the current fundamental frequency and harmonic graph visible so I can see how the synthesized sound changes between points. Make sure those displays reflect what the synth is actually playing.
+Update the Next/Back walkthrough to start with the empty board, guide me through recording and placing sounds, and then demonstrate each arm separately before combining them. Keep the calibration instructions tied to these same axis labels.
+Please check that I can complete the recording and placement process without getting stuck, that clearing the map works, and that the angle readings and marker agree with the axis labels. Tell me what you tested and what still needs checking with my actual camera and microphone.
+Add this prompt verbatim as a follow-up in the Motion Morph section of `AI_USE.md`, credit ChatGPT for helping draft it, and summarize the changes and actual testing in plain language. Then commit and push, check the deployment, and send me the commit and live app links.
+```
+
+</details>
+
+What changed, in plain language:
+- **Empty map.** The starter vowels are gone. Motion Morph opens on an empty map with a note telling me to add a sound, and explaining what "learning" means: nothing is trained. The app measures each recording's pitch (f0) and the strengths of its first 48 harmonics, then stores those numbers at the spot I choose. Between spots it mixes the numbers by distance and synthesizes one tone. Old saved projects keep my own sounds and drop the starters.
+- **Recordings vs. the map.** Every recording is kept in "Your recordings", whether it is on the map or not. 🧹 **Clear map** asks first, then removes every placed sound and drawn take from the map but keeps the recordings, so each can be placed again with "📍 Place on map" (takes with "Put back on map"). Deleting a recording is a separate 🗑 button that also asks first.
+- **One guided "Add a sound" process** with a step strip: Record → Listen → Place → Ready. If the recording has no clear pitch, the panel explains why right there and the button becomes "Try again"; nothing is saved. Listen plays ▶ Original and ▶ Synthesized and says what was measured. Place offers two choices:
+  - "Click a spot on the map" turns on placement mode with an instruction, and the dot appears with its name.
+  - "Use my current pose" counts down, then a dashed ring shows where my pose lands. I press "Put it here" or try again.
+
+  Ready confirms the sound is on the map and which pose plays it. Cancel placement (or Esc), Close and "Redo position" always work, and an unplaced recording stays in the library.
+- **Explicit axes.** The map has a blue horizontal axis "RIGHT ELBOW BEND" (← straighter arm, more bent arm →) and a pink vertical axis "LEFT ARM LIFT" (arm down at the bottom, arm raised at the top), with the range in degrees at each end. The camera preview draws my right shoulder–elbow–wrist in blue and my left hip–shoulder–elbow in pink, labelled with the live angle. A banner says the view is mirrored, so my RIGHT arm appears on the right, and "right/left" always means my own body. A panel beside the map shows each angle in degrees and the map coordinate it gives (for example "119° → x = 0.90"). Bending only the elbow changes x, lifting only the left arm changes y, and both move the marker diagonally.
+- **What changes the sound.** The "What you hear" card says that my arms only move the marker and the placed sounds decide the pitch and harmonics, with the "ah on the left, ee on the right, hum higher up" example. The percentages list my recordings and each take ("Take 1 (drawn)"), and the f0 and harmonic graph show what the synthesizer is actually playing.
+- **Draw + record.** The draw-and-record mode works as before (snippets matched to the pointer by time). After a take, the status and the takes list say each dot is a synthesized sound reconstructed from 0.2 s of the recording. "▶ Preview along the line" plays it, and Undo removes only the newest take.
+- **Tour.** The Back/Next tour now has 18 steps:
+  - the empty board, the camera and the blue/pink preview
+  - Add a sound, then Record, Listen, Place and Ready
+  - adding a second sound
+  - bending only the right elbow, lifting only the left arm, both together
+  - what you hear, Draw + record and the take buttons
+  - the range, using the same axis words
+  - Clear map and the recordings list
+
+What Claude tested, all with simulated input (generated body landmarks fed through the page's own pose handler, a synthetic microphone, Playwright's mouse): 188 unit tests and the build pass, including new tests for loading old projects, Clear map keeping recordings, and each angle moving only its own axis. The rewritten browser script passed 66 of 66 checks:
+- **Empty board.** The page opens with no sounds, shows the empty-map note, and the axis labels and colours are on the map and beside it.
+- **Axes.** Bending only the simulated right elbow moved the marker only right; lifting only the left arm moved it only up; both moved it diagonally. The degrees and x/y shown beside the map matched the measured angles and the marker every time.
+- **Add a sound.**
+  - Noise was rejected in the Record step with "Try again", and nothing was saved. A simulated sung "ah" at 196 Hz then went to Listen, where both playback buttons worked.
+  - Click placement could be cancelled with the button and with Esc. Clicking placed a labelled dot and reached Ready.
+  - A second sound "ee" (300 Hz) was placed by pose: countdown, dashed ring, then "Put it here". Losing the right elbow during the pose placed nothing and named the joint. Closing the panel in the middle of placing never left the page stuck.
+- **Playing.** The "ah" pose played 196 Hz at 100 %, the "ee" pose 300 Hz, and halfway (elbow only) a 50/50 mix at the same height. Percentages added up to 100 %, and the shown f0 and harmonics equalled what the synth played. A lost wrist faded the sound, which came back when the wrist returned. Redo position moved the same sound without duplicating it.
+- **Draw + record.** Pitch pieces landed where the pointer was at that time: a slow 150 Hz part and a fast 250 Hz part. The "reconstructed" labels showed, and the preview glided between the two pitches. The take played with the arms under the name "Take 1 (drawn)". Undo removed only the newest take.
+- **Clear map.** Saying no changed nothing. Confirming emptied the map (and the empty note came back) but kept both recordings and the take, which could be placed or put back again. 🗑 Delete recording removed only that one.
+- **Other checks.**
+  - After "Adjust to my movement", a dot moved but its pose still played the same sound.
+  - Everything survived a reload.
+  - The tour order was checked, every tour step highlighted a real control, and the tour changed nothing.
+  - The page has no sideways scrolling at phone width.
+  - The real pose model loads on Chromium's fake camera and tracks nothing.
+  - Vowel Morph, Motion Score and Frequency Playground still open.
+
 ### My own testing
 
-To confirm: recording and drawing with my own voice and microphone, listening to the blends, and trying the pose map (right elbow bend and left arm lift) with my own body in front of my laptop camera. For Motion Morph, also: recording a hum and a vowel, holding a pose after the countdown from a few steps back, drawing a take while singing ah → ee → oo, playing everything with my arms, and running "Adjust to my movement" and checking that my saved poses still play the same sounds.
+To confirm: recording and drawing with my own voice and microphone, listening to the blends, and trying the pose map (right elbow bend and left arm lift) with my own body in front of my laptop camera. For Motion Morph, also: starting from the empty map, recording "ah" and "ee" and placing one by clicking and one by pose, checking that bending only my right elbow moves the marker sideways and lifting only my left arm moves it up (with the mirrored preview), using Clear map and placing a recording again, recording a hum and a vowel, holding a pose after the countdown from a few steps back, drawing a take while singing ah → ee → oo, playing everything with my arms, and running "Adjust to my movement" and checking that my saved poses still play the same sounds.

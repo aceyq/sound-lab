@@ -210,14 +210,15 @@ test('clap: once on entering, quiet while held or shaking at the edge, again aft
   assert.equal(t2.update({ x: 0.9, y: 0.9 }, region, 1000), false);
 });
 
-test('starter sounds and project loading', () => {
+test('formant helper and project loading', () => {
   const ah = formantAmps(196, [[730, 90, 1], [1090, 110, 0.5], [2440, 170, 0.2]]);
   assert.equal(ah.length, 48);
   assert.equal(Math.max(...ah), 1);
   const p = loadProject(null);
-  assert.deepEqual(p.anchors.map((a) => a.name), ['Starter “ah”', 'Starter “ee”', 'Starter “oo”', 'Starter “eh”']);
+  assert.deepEqual(p.sounds, [], 'the map starts empty: no starter vowels');
   assert.equal(p.clap.on, false);
   const q = loadProject({ anchors: [{ name: 'x', angles: { bend: 50, lift: 40 }, analysis: { f0: 200, amps: [1] } }, { analysis: { f0: 0, amps: [1] }, pos: { x: 0, y: 0 } }], cal: { bend: { lo: 10, hi: 12 } } });
-  assert.equal(q.anchors.length, 1);
+  assert.equal(q.sounds.length, 1);
+  assert.deepEqual(q.sounds[0].place.angles, { bend: 50, lift: 40 });
   assert.deepEqual(q.cal.bend, DEFAULT_CAL.bend);
 });

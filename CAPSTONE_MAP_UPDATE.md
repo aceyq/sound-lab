@@ -75,3 +75,11 @@ Not covered: listening, real singing into a real microphone, a real person in fr
 ## Update (November 23, 2026): Motion Morph
 
 The camera page is now called **Motion Morph** (same `#/pose-map` link; `#/motion-morph` also works). The two-pose calibration was replaced by a default range plus an optional "Adjust to my movement" step (5th–95th percentile of 6 s of free movement, an angle that moved less than 15° keeps its range) and fine-tune buttons/sliders. "Add my sound" (record 3 s → analysis report, ▶ Original / ▶ Synthesized → pose by countdown or by clicking the map → how to play it) and "Draw + record" takes (Vowel Morph's take-model.js, stored as angles) were added. Everything a person places is stored as the two angles of its pose, so recalibrating moves dots on the map but keeps each sound on its pose; starters stay at the range corners. `scripts/verify-pose-map.mjs` was rewritten for the new workflow (69 checks); see AI_USE.md for the prompt and test summary.
+
+**Follow-up (November 23):**
+- The map now starts empty. The starter vowels were removed, and old projects keep only their own sounds.
+- Recordings live in a library separate from the map. Each sound has at most one place, stored as angles. **Clear map** (with confirmation) unplaces every sound and hides every take, but keeps the recordings. Deleting a recording is a separate action.
+- Adding a sound is one guided flow, Record → Listen → Place (click, or pose with a confirm ring) → Ready, with an in-place retry when the analysis fails.
+- Both axes are labelled on the map and in a panel beside it (degrees and x/y), in the same blue/pink as the preview joints, with a mirrored-view note.
+- The tour was rewritten to start from the empty board.
+- `scripts/verify-pose-map.mjs` was rewritten again (66 checks).

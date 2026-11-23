@@ -1,4 +1,6 @@
-// Automated browser checks for Motion Morph (#/pose-map, capstone part 3).
+// Automated browser checks for Motion Morph (#/pose-map, capstone part 3):
+// empty map, guided Add a sound (Record → Listen → Place → Ready), Clear map,
+// labelled axes, drawn takes, range, tour.
 // Usage: start the app (npx vite --port 5191 after `node scripts/copy-mediapipe.mjs`), then:
 //   node scripts/verify-pose-map.mjs http://localhost:5191/
 // Needs the `playwright` package.
@@ -108,7 +110,9 @@ const errors = [];
 const page = await context.newPage();
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => { if (m.type() === 'error' && !/WebSocket|\[vite\]|Failed to load resource/i.test(m.text())) errors.push(m.text()); });
-page.on('dialog', (dl) => dl.accept());
+let dialogs = [];
+let dialogAnswer = true;
+page.on('dialog', (dl) => { dialogs.push(dl.message()); return dialogAnswer ? dl.accept() : dl.dismiss(); });
 const dbg = () => page.evaluate(() => window.__poseMap.debug());
 const wait = (ms) => page.waitForTimeout(ms);
 const pose = (p) => page.evaluate((q) => { window.__pose = { bend: 15, lift: 15, hide: null, ...q }; }, p);
@@ -116,160 +120,184 @@ const notBusy = (ms = 10000) => page.waitForFunction(() => !window.__poseMap.deb
 const f = (x) => x.blend.params.f0;
 const topGroup = (x) => x.groups[0] || { name: '', weight: 0 };
 const near = (a, b, cents = 40) => Math.abs(1200 * Math.log2(a / b)) < cents;
+const shownDeg = (s) => Number((s.match(/(\d+)°/) || [])[1]);
+const shownCoord = (s) => Number((s.match(/= (\d\.\d\d)/) || [])[1]);
+const flowStep = async () => (await page.locator('.pm-flow-steps li.current').textContent().catch(() => '')).replace(/^\d/, '');
+const mapBox = async () => { await page.locator('svg.pm-square').scrollIntoViewIfNeeded(); return page.locator('svg.pm-square').boundingBox(); };
+let box;
+const toPx = (x, y) => [box.x + x * box.width, box.y + (1 - y) * box.height];
+const clickMap = async (x, y) => { box = await mapBox(); await page.mouse.click(...toPx(x, y)); };
+const sound = (x, name) => x.project.sounds.find((s) => s.name === name);
+const record = async (name, voice) => {
+  if (name) await page.getByLabel('Name of your sound').fill(name);
+  await page.evaluate(([fq, r]) => (fq === 'noise' ? window.__fakeVoice.noise() : window.__fakeVoice.set(fq, r)), voice);
+  await page.locator('.pm-add .pm-rec').click();
+  await page.waitForFunction(() => { const x = window.__poseMap.debug(); return !x.busy && x.flow && (x.flow.step !== 'record' || x.flow.ok === false); }, null, { timeout: 15000 });
+  await page.evaluate(() => window.__fakeVoice.set(0));
+};
 
 await page.goto(url + '#/pose-map');
 await page.waitForFunction(() => window.__poseMap);
 let d = await dbg();
-check('Page opens as “Motion Morph” with the starter sounds (ah, ee, oo, eh)', d.project.anchors.length === 4 && (await page.locator('h1').textContent()) === 'Motion Morph' && (await page.locator('.app-nav a[data-route="/pose-map"]').textContent()).includes('Motion Morph'), d.project.anchors.map((a) => `${a.name} ${a.analysis.f0} Hz`).join(', '));
-check('Workflow strip shows the four steps, none done yet', d.steps.length === 4 && d.steps.every((x) => !x), (await page.locator('.pm-steps').textContent()));
-check('Default range is in place without any calibration', d.calSource === 'default' && d.project.cal.bend.lo === 15 && d.project.cal.bend.hi === 130, JSON.stringify(d.project.cal));
 
-// ── default range: playable as soon as the arms are seen ──
+// ── 1. empty board ──
+const emptyText = await page.locator('.pm-empty').textContent();
+check('Page opens as “Motion Morph” with an EMPTY map (no starter vowels)', (await page.locator('h1').textContent()) === 'Motion Morph' && d.project.sounds.length === 0 && d.project.takes.length === 0 && d.onMap.length === 0 && d.blend.weights.length === 0);
+check('The empty map shows an instruction and explains what “learning” means', d.emptyShown && /Your map is empty/.test(emptyText) && /Add a sound/.test(emptyText) && /nothing is trained/.test(emptyText) && /48 harmonics/.test(emptyText), emptyText.slice(0, 140) + '…');
+check("Default range is in place without any calibration", d.project.calSource === 'default' && d.project.cal.bend.lo === 15 && d.project.cal.bend.hi === 130, JSON.stringify(d.project.cal));
+
+// ── 2. axis labels ──
+const svgText = await page.locator('svg.pm-square .pm-axes').textContent();
+check('Map axes are labelled: RIGHT ELBOW BEND (straighter arm ← → more bent arm) and LEFT ARM LIFT (arm down ↓ ↑ arm raised)', /RIGHT ELBOW BEND/.test(svgText) && /straighter arm/.test(svgText) && /more bent arm/.test(svgText) && /LEFT ARM LIFT/.test(svgText) && /arm down/.test(svgText) && /arm raised/.test(svgText), svgText.replace(/\s+/g, ' '));
+const panelText = await page.locator('.pm-axis-panel').textContent();
+check('Panel beside the map names both axes and their joints', /Horizontal \(x\) = Right elbow bend/.test(panelText) && /Vertical \(y\) = Left arm lift/.test(panelText), panelText.slice(0, 120));
+const colors = await page.evaluate(() => [...document.querySelectorAll('.pm-ax-head')].map((e) => getComputedStyle(e).color));
+check('Axis colours match the preview joint colours (blue = right elbow bend, pink = left arm lift)', colors[0] === 'rgb(88, 209, 255)' && colors[1] === 'rgb(255, 121, 198)', colors.join(', '));
+const legend = await page.locator('.pm-camera').textContent();
+check('Camera card explains mirroring and anatomical left/right', /mirrored/.test(legend) && /your right arm appears on the right/.test(legend) && /your own body/.test(legend));
+
+// ── 3. arms → marker, readings agree with labels ──
 await page.evaluate(() => { window.__feedOn = true; });
-await pose({ bend: 15, lift: 15 });
-await wait(500);
-await page.getByRole('button', { name: /Start sound/ }).click();
-await wait(400);
+const P0 = { bend: 40, lift: 50 };
+await pose(P0); await wait(600);
 const base = await dbg();
-check('Tracking both angles straight away (no calibration step)', base.tracking && Math.abs(base.angles.bend - 15) < 0.5 && Math.abs(base.angles.lift - 15) < 0.5 && base.soundOn, `bend ${base.angles.bend.toFixed(1)}°, lift ${base.angles.lift.toFixed(1)}°`);
-await pose({ bend: 100, lift: 15 }); await wait(700);
+await pose({ ...P0, bend: 100 }); await wait(700);
 const bendOnly = await dbg();
-await pose({ bend: 15, lift: 100 }); await wait(700);
+await pose({ ...P0, lift: 100 }); await wait(700);
 const liftOnly = await dbg();
 await pose({ bend: 100, lift: 100 }); await wait(700);
 const both = await dbg();
-check('Right elbow bend alone moves the marker only left/right', Math.abs(bendOnly.dot.y - base.dot.y) < 0.01 && bendOnly.dot.x > base.dot.x + 0.5, `(${base.dot.x.toFixed(2)}, ${base.dot.y.toFixed(2)}) → (${bendOnly.dot.x.toFixed(2)}, ${bendOnly.dot.y.toFixed(2)})`);
-check('Left arm lift alone moves the marker only up/down', Math.abs(liftOnly.dot.x - base.dot.x) < 0.01 && liftOnly.dot.y > base.dot.y + 0.5, `(${base.dot.x.toFixed(2)}, ${base.dot.y.toFixed(2)}) → (${liftOnly.dot.x.toFixed(2)}, ${liftOnly.dot.y.toFixed(2)})`);
-check('The two angles together set the blend', new Set([f(base), f(bendOnly), f(liftOnly), f(both)].map((v) => v.toFixed(2))).size === 4, `f0: start ${f(base).toFixed(1)}, bend ${f(bendOnly).toFixed(1)}, lift ${f(liftOnly).toFixed(1)}, both ${f(both).toFixed(1)} Hz`);
-const sumW = both.groups.reduce((s, g) => s + g.weight, 0);
-check('Percentages add up to 100 % and the synth plays exactly the blended f0 and harmonics', Math.abs(sumW - 1) < 1e-6 && both.audio.kind === 'synth' && Math.abs(both.audio.params.f0 - f(both)) < 1e-6 && both.audio.params.amps.every((a, i) => Math.abs(a - both.blend.params.amps[i]) < 1e-9),
-  both.groups.map((g) => `${g.name} ${(g.weight * 100).toFixed(0)} %`).join(', '));
-check('Harmonic graph and contribution bars are on the page', await page.locator('canvas.pm-harm').count() >= 1 && await page.locator('.pm-weights .pm-wrow').count() >= 2);
-await pose({ bend: 60, lift: 40 }); await wait(600);
-const h0 = await dbg();
-const held = [];
-for (let i = 0; i < 10; i++) { await wait(200); held.push(await dbg()); }
-check('A held pose holds one steady sound (2 s)', held.every((x) => x.soundOn && x.tracking && x.gate > 0.95 && Math.abs(f(x) - f(h0)) < 0.01), `f0 ${f(h0).toFixed(2)} Hz throughout`);
-d = await dbg();
-check('Steps 1 and 2 are ticked after the camera tracks and the starters play', d.steps[0] && d.steps[1] && !d.steps[2]);
+const cal = base.project.cal;
+const expX = (b) => (b - cal.bend.lo) / (cal.bend.hi - cal.bend.lo);
+const expY = (l) => (l - cal.lift.lo) / (cal.lift.hi - cal.lift.lo);
+check('Bending only the right elbow (more bent) moves the marker only to the RIGHT', bendOnly.dot.x > base.dot.x + 0.4 && Math.abs(bendOnly.dot.y - base.dot.y) < 0.01, `(${base.dot.x.toFixed(2)}, ${base.dot.y.toFixed(2)}) → (${bendOnly.dot.x.toFixed(2)}, ${bendOnly.dot.y.toFixed(2)})`);
+check('Lifting only the left arm (raised) moves the marker only UP', liftOnly.dot.y > base.dot.y + 0.4 && Math.abs(liftOnly.dot.x - base.dot.x) < 0.01, `(${base.dot.x.toFixed(2)}, ${base.dot.y.toFixed(2)}) → (${liftOnly.dot.x.toFixed(2)}, ${liftOnly.dot.y.toFixed(2)})`);
+check('Both together move it diagonally (right and up)', both.dot.x > base.dot.x + 0.4 && both.dot.y > base.dot.y + 0.4);
+const agree = [base, bendOnly, liftOnly, both].every((x) => Math.abs(shownDeg(x.shown.axis[0]) - x.angles.bend) <= 1 && Math.abs(shownDeg(x.shown.axis[1]) - x.angles.lift) <= 1
+  && Math.abs(shownCoord(x.shown.axis[0]) - x.dot.x) <= 0.006 && Math.abs(shownCoord(x.shown.axis[1]) - x.dot.y) <= 0.006
+  && Math.abs(x.dot.x - Math.min(1, Math.max(0, expX(x.angles.bend)))) < 0.01 && Math.abs(x.dot.y - Math.min(1, Math.max(0, expY(x.angles.lift)))) < 0.01);
+check('Degrees and map coordinates shown beside the map agree with the measured angles and the marker', agree, [base, both].map((x) => x.shown.axis.join(' | ')).join('  ;  '));
 
-// ── tracking drops ──
-await pose({ bend: 60, lift: 40, hide: 16 }); // right wrist
-await wait(900);
+// ── 4. Add a sound: failure → retry → listen → click placement (with cancel) → ready ──
+await page.locator('.pm-add-btn').click();
 d = await dbg();
-check('Losing the right wrist names it, freezes the marker and fades the sound', !d.tracking && /right wrist/.test(d.lostText) && d.gate < 0.05 && Math.abs(d.dot.x - h0.dot.x) < 0.02, `${d.lostText} gate ${d.gate.toFixed(3)}`);
-await pose({ bend: 60, lift: 40 }); await wait(600);
+check('Add a sound opens the guided panel at step 1 (Record) with a step indicator', d.flow && d.flow.step === 'record' && (await page.locator('.pm-flow-steps li').count()) === 4 && /Record/.test(await flowStep()), await page.locator('.pm-flow-steps').textContent());
+await record('ah', ['noise']);
 d = await dbg();
-check('Sound fades back in when the joint returns', d.tracking && d.gate > 0.9, `gate ${d.gate.toFixed(3)}`);
-await page.evaluate(() => { window.__feedOn = false; });
-await wait(900);
+const failText = await page.locator('.pm-fail').textContent().catch(() => '');
+check('A recording with no pitch (noise) is explained right there, with “Try again”, and nothing is saved', d.flow.step === 'record' && d.flow.ok === false && /couldn’t be analyzed/.test(failText) && /pitch/.test(failText) && (await page.locator('.pm-add .pm-rec').textContent()).includes('Try again') && d.project.sounds.length === 0, failText.slice(0, 160));
+await record(null, [196, 'ah']);
 d = await dbg();
-check('No camera frames → tracking lost and sound faded', !d.tracking && d.gate < 0.05, d.lostText);
-await page.evaluate(() => { window.__feedOn = true; });
-await wait(400);
-await page.getByRole('button', { name: /Stop sound/ }).click();
-
-// ── Add my sound: record → check → pose ──
-await page.getByRole('button', { name: /Add my sound/ }).click();
-await page.getByLabel('Name of your sound').fill('Hum');
-await page.evaluate(() => window.__fakeVoice.set(233, 'hum'));
-await page.locator('.pm-add .pm-rec').click();
-await page.waitForFunction(() => { const x = window.__poseMap.debug(); return !x.busy && x.draft && x.draft.ok != null; }, null, { timeout: 15000 });
-d = await dbg();
-check('A steady hum (simulated 233 Hz) is recorded and analyzed', d.draft.ok && Math.abs(d.draft.f0 - 233) < 2, `f0 ${d.draft.f0} Hz`);
+check('Try again with a steady sung “ah” (simulated 196 Hz) moves on to step 2 (Listen)', d.flow.step === 'listen' && /Listen/.test(await flowStep()) && d.project.sounds.length === 1 && sound(d, 'ah').place === null && Math.abs(sound(d, 'ah').analysis.f0 - 196) < 2, `f0 ${sound(d, 'ah').analysis.f0} Hz; in the library, not on the map yet`);
 const heard = await page.locator('.pm-heard').textContent();
-check('The panel says what was analyzed and what will be synthesized', /What the app heard/.test(heard) && /fundamental/.test(heard) && /harmonics stood out/.test(heard) && /What it will synthesize/.test(heard) && /48 sine waves/.test(heard), heard.slice(0, 160) + '…');
+check('Listen step says what was measured and what will be synthesized', /What the app measured/.test(heard) && /harmonics stood out/.test(heard) && /48 sine waves/.test(heard), heard.slice(0, 140) + '…');
 await page.locator('.pm-add .pm-orig').click(); await wait(200);
 const origKind = (await dbg()).audio.kind;
 await page.locator('.pm-add .pm-synth').click(); await wait(200);
 d = await dbg();
-check('▶ Original plays the recording and ▶ Synthesized plays the rebuilt sound (even with sound off)', origKind === 'original' && d.audio.kind === 'synth' && Math.abs(d.audio.params.f0 - 233) < 2 && d.gateTarget === 1, `${origKind} then ${d.audio.kind} ${d.audio.params && d.audio.params.f0} Hz`);
+check('▶ Original recording and ▶ Synthesized version both play', origKind === 'original' && d.audio.kind === 'synth' && Math.abs(d.audio.params.f0 - 196) < 2, `${origKind}, then ${d.audio.kind} ${d.audio.params && d.audio.params.f0} Hz`);
 await wait(1700);
-const HUM = { bend: 70, lift: 75 };
-await pose(HUM);
+await page.locator('.pm-add .pm-to-place').click();
+d = await dbg();
+check('Step 3 (Place) offers two choices: click a spot, or use my current pose', d.flow.step === 'place' && /Place/.test(await flowStep()) && await page.locator('.pm-add .pm-click-btn').count() === 1 && await page.locator('.pm-add .pm-pose-btn').count() === 1);
+await page.locator('.pm-add .pm-click-btn').click();
+d = await dbg();
+const hint = await page.locator('.pm-map-hint').textContent();
+check('“Click a spot on the map” turns on placement mode with an instruction', d.mode === 'place' && /Placement mode: click where you want “ah”/.test(hint) && await page.locator('svg.pm-square.placing').count() === 1 && !d.emptyShown, hint);
+await page.getByRole('button', { name: 'Cancel placement' }).first().click();
+d = await dbg();
+check('Cancel placement leaves placement mode; the recording is kept and can still be placed', d.mode === 'play' && d.flow.step === 'place' && /cancelled/.test(d.flow.placeMsg) && d.project.sounds.length === 1 && d.onMap.length === 0, d.flow.placeMsg);
+await page.locator('.pm-add .pm-click-btn').click();
+await page.keyboard.press('Escape');
+d = await dbg();
+check('Esc also cancels placement', d.mode === 'play' && d.flow.step === 'place');
+await page.locator('.pm-add .pm-click-btn').click();
+await clickMap(0.1, 0.5);
+d = await dbg();
+const ahDot = d.onMap.find((a) => a.name === 'ah');
+const ready = await page.locator('.pm-add .pm-howto').textContent().catch(() => '');
+check('Clicking places it: labelled dot on the map, step 4 (Ready) says it is ready to play', ahDot && Math.abs(ahDot.pos.x - 0.1) < 0.01 && Math.abs(ahDot.pos.y - 0.5) < 0.01 && sound(d, 'ah').place.placedBy === 'click' && d.flow.step === 'ready' && /Ready/.test(await flowStep()) && /“ah” is on the map and ready to play/.test(ready) && (await page.locator('svg.pm-square .pm-anchors').textContent()).includes('ah') && !d.emptyShown, ready.slice(0, 160));
+
+// ── 5. second sound by pose: countdown → ring shows where it lands → confirm ──
+await page.locator('.pm-add .pm-add-another').click();
+await record('ee', [300, 'ee']);
+await page.locator('.pm-add .pm-to-place').click();
+const EE = { bend: 0.9 * 115 + 15, lift: 0.5 * 105 + 15 }; // right edge, same height as "ah"
+await pose(EE);
 await page.locator('.pm-add .pm-pose-btn').click();
 await wait(400);
 d = await dbg();
-check('Use my pose counts down first (time to step back)', d.busy && /Step back/.test(d.countdown) && /3/.test(d.countdown), JSON.stringify(d.countdown));
+check('“Use my current pose” counts down first', d.busy && /Step back/.test(d.countdown), JSON.stringify(d.countdown));
 await notBusy();
 d = await dbg();
-let hum = d.project.anchors.find((a) => a.name === 'Hum');
-check('The sound is saved at the held pose (as two angles)', hum && Math.abs(hum.angles.bend - HUM.bend) < 0.6 && Math.abs(hum.angles.lift - HUM.lift) < 0.6 && hum.placedBy === 'pose', hum ? JSON.stringify(hum.angles) : d.draft.poseMsg);
-const howto = await page.locator('.pm-howto').textContent().catch(() => '');
-check('Right after saving, the panel explains how to play it with your arms', /How to play “Hum” with your arms/.test(howto) && /elbow/.test(howto) && /left arm/.test(howto), howto);
-check('The pose target is marked on both angle bars', await page.locator('.pm-bar-target:not([hidden])').count() === 2);
+const confirmText = await page.locator('.pm-confirm').textContent().catch(() => '');
+check('After the countdown a dashed ring shows where the pose lands, and asks to confirm', d.flow.step === 'confirm' && d.pending && Math.abs(d.pending.bend - EE.bend) < 0.6 && Math.abs(d.pending.lift - EE.lift) < 0.6 && await page.locator('.pm-pending-ring').count() === 1 && /lands at the dashed ring/.test(confirmText) && sound(d, 'ee').place === null, confirmText.slice(0, 150));
+await page.screenshot({ path: shots + 'motion-01-confirm-pose.png' });
+await page.locator('.pm-add .pm-confirm-btn').click();
+d = await dbg();
+check('“Put it here” places “ee” at that pose (step Ready)', d.flow.step === 'ready' && sound(d, 'ee').place.placedBy === 'pose' && Math.abs(sound(d, 'ee').place.angles.bend - EE.bend) < 0.6 && d.onMap.length === 2 && await page.locator('.pm-pending-ring').count() === 0);
+// pose with tracking lost: nothing placed, joint named, can retry
+await page.locator('.pm-add .pm-redo-pos').click();
+await pose({ ...EE, hide: 14 });
+await page.locator('.pm-add .pm-pose-btn').click();
+await notBusy();
+d = await dbg();
+check('If tracking drops during the pose hold, nothing moves, the joint is named and you can retry', d.flow.step === 'place' && /right elbow/.test(d.flow.placeMsg) && Math.abs(sound(d, 'ee').place.angles.bend - EE.bend) < 0.6 && await page.locator('.pm-add .pm-pose-btn').isEnabled(), d.flow.placeMsg);
+await pose(EE);
+await page.locator('.pm-add button', { hasText: 'Close' }).click();
+d = await dbg();
+check('Closing the panel mid-placement never gets stuck (back to play mode, nothing pending)', !d.flow && d.mode === 'play' && !d.pending && !d.busy);
+
+// ── 6. play: ah on the left, ee on the right ──
 await page.getByRole('button', { name: /Start sound/ }).click();
-await wait(500);
-d = await dbg();
-check('Holding that pose plays the hum (233 Hz, ≈100 %)', topGroup(d).name === 'Hum' && topGroup(d).weight > 0.98 && near(f(d), 233, 10), `${topGroup(d).name} ${(topGroup(d).weight * 100).toFixed(1)} %, ${f(d).toFixed(1)} Hz`);
-check('Step 3 and 4 ticked once my sound is added and played', d.steps[2] && d.steps[3], JSON.stringify(d.steps));
-await pose({ bend: 15, lift: 15 }); await wait(500);
-const toAh = await dbg();
-await pose({ bend: 42, lift: 45 }); await wait(500);
+const AH = sound(d, 'ah').place.angles;
+await pose(AH); await wait(600);
+const atAh = await dbg();
+await pose(EE); await wait(600);
+const atEe = await dbg();
+await pose({ bend: (AH.bend + EE.bend) / 2, lift: AH.lift }); await wait(600);
 const mid = await dbg();
-check('Moving back toward a starter blends toward it', topGroup(toAh).name.includes('ah') && mid.groups.find((g) => g.name === 'Hum').weight > 0.05 && mid.groups.find((g) => g.name === 'Hum').weight < 0.95, `at ah: ${topGroup(toAh).name}; halfway: Hum ${(mid.groups.find((g) => g.name === 'Hum').weight * 100).toFixed(0)} %, f0 ${f(mid).toFixed(1)} Hz`);
-await page.screenshot({ path: shots + 'motion-01-my-sound.png' });
+check('Holding the “ah” pose plays ah (196 Hz, 100 %); the “ee” pose plays ee (300 Hz)', topGroup(atAh).name === 'ah' && topGroup(atAh).weight > 0.98 && near(f(atAh), 196, 10) && topGroup(atEe).name === 'ee' && near(f(atEe), 300, 10), `${f(atAh).toFixed(1)} Hz / ${f(atEe).toFixed(1)} Hz`);
+check('Bending only the right elbow halfway glides between them (marker stays at the same height)', mid.groups.length === 2 && Math.abs(mid.groups[0].weight - 0.5) < 0.05 && f(mid) > 196 && f(mid) < 300 && Math.abs(mid.dot.y - atAh.dot.y) < 0.01, mid.groups.map((g) => `${g.name} ${(g.weight * 100).toFixed(0)} %`).join(', ') + `, ${f(mid).toFixed(1)} Hz`);
+const sumW = mid.groups.reduce((s, g) => s + g.weight, 0);
+const pct = await page.locator('.pm-weights').textContent();
+check('Contribution percentages add up to 100 % and are shown', Math.abs(sumW - 1) < 1e-6 && /ah/.test(pct) && /ee/.test(pct) && /%/.test(pct), pct);
+check('Shown f0 and harmonics are what the synth is playing', mid.audio.kind === 'synth' && Math.abs(mid.audio.params.f0 - f(mid)) < 0.5 && mid.audio.params.amps.every((a, i) => Math.abs(a - mid.blend.params.amps[i]) < 1e-6) && mid.shown.f0.includes(mid.audio.params.f0.toFixed(0).slice(0, 3)), `${mid.shown.f0} (synth ${mid.audio.params.f0.toFixed(1)} Hz)`);
+await page.screenshot({ path: shots + 'motion-02-two-sounds.png' });
 
-// ── redo position, with a tracking drop during the hold ──
-await pose({ bend: 110, lift: 50, hide: 14 }); // right elbow lost
-await page.locator('.pm-add .pm-pose-btn').click();
-await notBusy();
+// tracking drop while playing
+await pose({ ...EE, hide: 16 });
+await wait(900);
 d = await dbg();
-hum = d.project.anchors.find((a) => a.name === 'Hum');
-check('If tracking drops during the hold, nothing changes and the lost joint is named', /couldn’t see both arms/.test(d.draft.poseMsg) && /right elbow/.test(d.draft.poseMsg) && Math.abs(hum.angles.bend - HUM.bend) < 0.6, d.draft.poseMsg);
-await pose({ bend: 110, lift: 50 });
-await page.locator('.pm-add .pm-pose-btn').click();
-await notBusy();
+check('Losing the right wrist names it and fades the sound', !d.tracking && /right wrist/.test(d.lostText) && d.gate < 0.05, d.lostText);
+await pose(EE); await wait(600);
 d = await dbg();
-const hum2 = d.project.anchors.find((a) => a.name === 'Hum');
-check('Redo position moves the same sound to the new pose', hum2.id === hum.id && Math.abs(hum2.angles.bend - 110) < 0.6 && Math.abs(hum2.angles.lift - 50) < 0.6 && d.project.anchors.filter((a) => a.name === 'Hum').length === 1, JSON.stringify(hum2.angles));
+check('Sound comes back when the joint returns', d.tracking && d.gate > 0.9);
+await page.getByRole('button', { name: /Stop sound/ }).click();
 
-// ── a recording without a usable estimate ──
-await page.evaluate(() => window.__fakeVoice.noise());
-await page.locator('.pm-add .pm-rec').click();
-await page.waitForFunction(() => { const x = window.__poseMap.debug(); return !x.busy && /Recording/.test(x.draft.msg) === false; }, null, { timeout: 15000 });
+// redo position from the library (no re-recording)
+await page.locator(`.pm-row[data-id="${sound(d, 'ah').id}"] .pm-place`).click();
 d = await dbg();
-const failText = await page.locator('.pm-fail').textContent().catch(() => '');
-check('Noise (no pitch) is rejected with a clear reason and tip; the saved hum is kept', d.draft.ok === false && /No usable estimate/.test(failText) && /pitch/.test(failText) && /try again/i.test(failText) && near(d.project.anchors.find((a) => a.name === 'Hum').analysis.f0, 233, 10), failText);
-await page.evaluate(() => window.__fakeVoice.set(0));
-await page.getByRole('button', { name: 'Done' }).click();
-
-// ── click-to-place ──
-await page.getByRole('button', { name: /Add my sound/ }).click();
-await page.getByLabel('Name of your sound').fill('Oh');
-await page.evaluate(() => window.__fakeVoice.set(300, 'ah'));
-await page.locator('.pm-add .pm-rec').click();
-await page.waitForFunction(() => { const x = window.__poseMap.debug(); return !x.busy && x.draft && x.draft.ok != null; }, null, { timeout: 15000 });
-await page.evaluate(() => window.__fakeVoice.set(0));
+check('“Redo position” from Your recordings goes straight to Place', d.flow && d.flow.step === 'place' && d.flow.name === 'ah');
 await page.locator('.pm-add .pm-click-btn').click();
+await clickMap(0.1, 0.8);
 d = await dbg();
-check('“Click the map instead” waits for a click on the map', d.mode === 'place' && /Click anywhere on the map/.test(await page.locator('.pm-map-hint').textContent()));
-await page.locator('svg.pm-square').scrollIntoViewIfNeeded();
-let box = await page.locator('svg.pm-square').boundingBox();
-const toPx = (x, y) => [box.x + x * box.width, box.y + (1 - y) * box.height];
-await page.mouse.click(...toPx(0.35, 0.8));
-d = await dbg();
-const oh = d.project.anchors.find((a) => a.name === 'Oh');
-const ohDot = d.anchorsOnMap.find((a) => a.name === 'Oh');
-const cal0 = d.project.cal;
-const angOf = (x, y, c = cal0) => ({ bend: c.bend.lo + x * (c.bend.hi - c.bend.lo), lift: c.lift.lo + y * (c.lift.hi - c.lift.lo) });
-check('Clicking places the sound there; it is saved as the pose that reaches that spot', oh && oh.placedBy === 'click' && Math.abs(ohDot.pos.x - 0.35) < 0.01 && Math.abs(ohDot.pos.y - 0.8) < 0.01 && Math.abs(oh.angles.bend - angOf(0.35, 0.8).bend) < 0.6, oh ? `angles ${JSON.stringify(oh.angles)}, dot (${ohDot.pos.x.toFixed(3)}, ${ohDot.pos.y.toFixed(3)})` : 'not placed');
-await page.getByRole('button', { name: 'Done' }).click();
+check('The same sound moves to the new spot (no duplicate)', d.project.sounds.filter((s) => s.name === 'ah').length === 1 && Math.abs(d.onMap.find((a) => a.name === 'ah').pos.y - 0.8) < 0.01);
+await page.locator('.pm-add button', { hasText: 'Done' }).click();
 
-// ── Draw + record: timing alignment ──
+// ── 7. Draw + record ──
 await page.getByRole('button', { name: /Draw \+ record/ }).click();
 await page.waitForFunction(() => window.__poseMap.debug().micListening, null, { timeout: 5000 });
 check('Draw + record opens the microphone and stops the map sound', (await dbg()).mode === 'draw' && !(await dbg()).soundOn);
-async function drawTake({ aSec, bSec, a, b, yMid = 0.45 }) {
-  await page.locator('svg.pm-square').scrollIntoViewIfNeeded();
-  box = await page.locator('svg.pm-square').boundingBox();
-  const curve = (x) => yMid + 0.15 * Math.sin((x - 0.1) * 2 * Math.PI * 1.25);
+async function drawTake({ aSec, bSec, a, b, yMid = 0.3 }) {
+  box = await mapBox();
+  const curve = (x) => yMid + 0.12 * Math.sin((x - 0.1) * 2 * Math.PI * 1.25);
   await page.evaluate(([fq, r]) => window.__fakeVoice.set(fq, r), a);
   await wait(150);
-  await page.mouse.move(...toPx(0.1, curve(0.1)));
+  await page.mouse.move(...toPx(0.2, curve(0.2)));
   await page.mouse.down();
-  const seg = async (x0, x1, sec, sound) => {
-    if (sound) await page.evaluate(([fq, r]) => window.__fakeVoice.set(fq, r), sound);
+  const seg = async (x0, x1, sec, snd) => {
+    if (snd) await page.evaluate(([fq, r]) => window.__fakeVoice.set(fq, r), snd);
     const t0 = Date.now();
     for (;;) {
       const u = Math.min(1, (Date.now() - t0) / (sec * 1000));
@@ -279,126 +307,114 @@ async function drawTake({ aSec, bSec, a, b, yMid = 0.45 }) {
       await wait(12);
     }
   };
-  await seg(0.1, 0.3, aSec, null);
-  await seg(0.3, 0.9, bSec, b);
+  await seg(0.2, 0.4, aSec, null);
+  await seg(0.4, 0.85, bSec, b);
   await page.mouse.up();
   await page.evaluate(() => window.__fakeVoice.set(0));
-  await page.waitForFunction(() => !window.__poseMap.debug().drawing && /usable point/.test(window.__poseMap.debug().drawStatus), null, { timeout: 20000 });
+  await page.waitForFunction(() => !window.__poseMap.debug().drawing && /learned \d+ point/.test(window.__poseMap.debug().drawStatus), null, { timeout: 20000 });
 }
 const calDraw = (await dbg()).project.cal;
-await drawTake({ aSec: 1.6, bSec: 0.9, a: [150, 'ah'], b: [300, 'ee'] });
+await drawTake({ aSec: 1.6, bSec: 0.9, a: [150, 'ah'], b: [250, 'ee'] });
 d = await dbg();
 const take1 = d.project.takes[0];
 const xOf = (p) => (p.bend - calDraw.bend.lo) / (calDraw.bend.hi - calDraw.bend.lo);
-const A = take1.points.filter((p) => xOf(p) < 0.28);
-const B = take1.points.filter((p) => xOf(p) > 0.33);
-check('Take 1 stored with learned points (saved as poses)', take1.points.length >= 12 && take1.points.every((p) => Number.isFinite(p.bend) && Number.isFinite(p.lift)), `${take1.points.length} of ${take1.stats.snippets} snippets; ${d.drawStatus.slice(0, 90)}…`);
-check('Points drawn slowly during the 150 Hz part have f0 ≈ 150 Hz', A.length >= 6 && A.every((p) => near(p.f0, 150, 60)), `${A.length} points`);
-check('Points drawn fast during the 300 Hz part have f0 ≈ 300 Hz', B.length >= 3 && B.every((p) => near(p.f0, 300, 60)), `${B.length} points`);
-check('Speed change: most points sit on the slow first part (aligned by time, not spread by length)', A.length / take1.points.length > 0.5, `${(100 * A.length / take1.points.length).toFixed(0)} % of points in the first 25 % of the line`);
-check('After the take, the hint says how to play it with your arms', /To play it with your arms, start at/.test(d.drawStatus), d.drawStatus.slice(0, 200));
-await page.screenshot({ path: shots + 'motion-02-take.png' });
-
-// play the take with the arms
-await page.getByRole('button', { name: /Draw \+ record/ }).click(); // leave draw mode
-await page.getByRole('button', { name: /Start sound/ }).click();
-const first = take1.points[1];
-const last = take1.points[take1.points.length - 2];
-await pose({ bend: first.bend, lift: first.lift }); await wait(600);
-const atFirst = await dbg();
-await pose({ bend: last.bend, lift: last.lift }); await wait(600);
-const atLast = await dbg();
-check('Moving the arms along the take plays it: ≈150 Hz at its start, ≈300 Hz at its end', topGroup(atFirst).name === 'Take 1' && near(f(atFirst), 150, 50) && near(f(atLast), 300, 50), `start ${f(atFirst).toFixed(0)} Hz (${topGroup(atFirst).name} ${(topGroup(atFirst).weight * 100).toFixed(0)} %), end ${f(atLast).toFixed(0)} Hz`);
-check('Contribution bars group the take into one entry', atFirst.groups.filter((g) => g.name === 'Take 1').length === 1, atFirst.groups.map((g) => g.name).join(', '));
+const A = take1.points.filter((p) => xOf(p) < 0.38);
+const B = take1.points.filter((p) => xOf(p) > 0.43);
+check('Take 1 stored with learned points', take1.points.length >= 12, `${take1.points.length} of ${take1.stats.snippets} snippets`);
+check('Points drawn slowly during the 150 Hz part have f0 ≈ 150 Hz; fast 250 Hz part ≈ 250 Hz (matched by time)', A.length >= 6 && A.every((p) => near(p.f0, 150, 60)) && B.length >= 3 && B.every((p) => near(p.f0, 250, 60)) && A.length / take1.points.length > 0.5, `${A.length} slow / ${B.length} fast points`);
+check('After the take, it says the dots are synthesized sounds reconstructed from the recording, and how to play it', /synthesized sound reconstructed/.test(d.drawStatus) && /start at/.test(d.drawStatus), d.drawStatus.slice(0, 220));
+check('Takes list labels its points as reconstructed, not the recording', /synthesized sounds reconstructed from your recording/.test(await page.locator('.pm-take-list').textContent()));
+await page.screenshot({ path: shots + 'motion-03-take.png' });
+await page.getByRole('button', { name: /Draw \+ record/ }).click();
 await page.locator('.pm-take-row .pm-replay').first().click();
 const seen = [];
 for (let i = 0; i < 30; i++) { await wait(100); const x = await dbg(); if (x.blend.params) seen.push(x.blend.params.f0); }
-check('“Hear along the line” glides from the first sound to the second', Math.min(...seen) < 175 && Math.max(...seen) > 270, `${Math.min(...seen).toFixed(0)}–${Math.max(...seen).toFixed(0)} Hz`);
-await wait(500);
-
-// second take, then undo only that one
+check('“▶ Preview along the line” glides from the first sound to the second', Math.min(...seen) < 175 && Math.max(...seen) > 220, `${Math.min(...seen).toFixed(0)}–${Math.max(...seen).toFixed(0)} Hz`);
+await wait(600);
+await page.getByRole('button', { name: /Start sound/ }).click();
+const p1 = take1.points[1];
+await pose({ bend: p1.bend, lift: p1.lift }); await wait(600);
+d = await dbg();
+check('Playing the take with the arms: its start pose plays its first sound, listed as “Take 1 (drawn)”', topGroup(d).name === 'Take 1 (drawn)' && near(f(d), p1.f0, 30), `${topGroup(d).name} ${(topGroup(d).weight * 100).toFixed(0)} %, ${f(d).toFixed(0)} Hz`);
+await page.getByRole('button', { name: /Stop sound/ }).click();
 await page.getByRole('button', { name: /Draw \+ record/ }).click();
 await page.waitForFunction(() => window.__poseMap.debug().micListening);
-await drawTake({ aSec: 0.8, bSec: 0.8, a: [220, 'ee'], b: [180, 'ah'], yMid: 0.2 });
-d = await dbg();
-check('A second take is added', d.project.takes.length === 2 && d.project.takes[1].points.length >= 6);
+await drawTake({ aSec: 0.8, bSec: 0.8, a: [220, 'ee'], b: [180, 'ah'], yMid: 0.15 });
 await page.getByRole('button', { name: /Undo last take/ }).click();
 d = await dbg();
-check('Undo removes only the latest take; my sounds and starters stay', d.project.takes.length === 1 && d.project.takes[0].id === take1.id && d.project.anchors.some((a) => a.name === 'Hum') && d.project.anchors.some((a) => a.name === 'Oh') && d.project.anchors.filter((a) => a.source === 'starter').length === 4, d.drawStatus);
+check('Undo removes only the latest take; recordings and placed sounds stay', d.project.takes.length === 1 && d.project.takes[0].id === take1.id && d.onMap.length === 2);
 await page.getByRole('button', { name: /Draw \+ record/ }).click();
 
-// ── Adjust to my movement ──
-const before = (await dbg()).project.cal;
-const humPose = d.project.anchors.find((a) => a.name === 'Hum').angles;
-const ohPose = d.project.anchors.find((a) => a.name === 'Oh').angles;
-const tk = d.project.takes[0].points[3];
-const dotsBefore = (await dbg()).anchorsOnMap;
-await page.getByRole('button', { name: /Adjust to my movement/ }).click();
-await wait(3200); // countdown
-const sweep = [];
-const t0 = Date.now();
-while (Date.now() - t0 < 6000) { const u = (Date.now() - t0) / 6000; const p = { bend: 40 + 75 * (0.5 - 0.5 * Math.cos(u * 6 * Math.PI)), lift: 25 + 95 * (0.5 - 0.5 * Math.cos(u * 4 * Math.PI)) }; sweep.push(p); await pose(p); await wait(30); }
-await notBusy();
+// ── 8. Clear map ──
+dialogAnswer = false; dialogs = [];
+await page.locator('.pm-clear-btn').click();
 d = await dbg();
-check('Adjust estimates the range I actually used', d.calSource === 'adjusted' && Math.abs(d.project.cal.bend.lo - 40) < 6 && Math.abs(d.project.cal.bend.hi - 115) < 6 && Math.abs(d.project.cal.lift.lo - 25) < 6 && Math.abs(d.project.cal.lift.hi - 120) < 6, `${JSON.stringify(before)} → ${JSON.stringify(d.project.cal)}`);
-check('It shows how the response changed (degrees → % of the map)', /now moves the marker \d+ % of the map \(was \d+ %\)/.test(d.rangeMsg) && /moved on the map/.test(d.rangeMsg), d.rangeMsg);
-const dotsAfter = d.anchorsOnMap;
-const moved = (n) => { const a = dotsBefore.find((x) => x.name === n).pos; const b = dotsAfter.find((x) => x.name === n).pos; return Math.hypot(a.x - b.x, a.y - b.y); };
-check('My dots moved on the map, starters stayed at their corners', moved('Hum') > 0.03 && moved('Starter “ah”') < 1e-9 && d.ghosts > 0, `Hum moved ${moved('Hum').toFixed(3)}, ah moved ${moved('Starter “ah”').toFixed(3)}`);
-check('Saved poses keep their angles through the new range', JSON.stringify(d.project.anchors.find((a) => a.name === 'Hum').angles) === JSON.stringify(humPose) && JSON.stringify(d.project.takes[0].points[3].bend) === JSON.stringify(tk.bend));
-await pose(humPose); await wait(600);
-const humAfter = await dbg();
-await pose(ohPose); await wait(600);
-const ohAfter = await dbg();
-await pose({ bend: tk.bend, lift: tk.lift }); await wait(600);
-const tkAfter = await dbg();
-check('After adjusting: holding the Hum pose still plays the hum', topGroup(humAfter).name === 'Hum' && topGroup(humAfter).weight > 0.98 && near(f(humAfter), 233, 10), `${topGroup(humAfter).name} ${(topGroup(humAfter).weight * 100).toFixed(1)} %, ${f(humAfter).toFixed(1)} Hz`);
-check('After adjusting: the click-placed “Oh” still plays at its pose', topGroup(ohAfter).name === 'Oh' && topGroup(ohAfter).weight > 0.98 && near(f(ohAfter), 300, 10), `${topGroup(ohAfter).name} ${(topGroup(ohAfter).weight * 100).toFixed(1)} %, ${f(ohAfter).toFixed(1)} Hz`);
-check('After adjusting: a drawn take point still plays at its pose', topGroup(tkAfter).name === 'Take 1' && near(f(tkAfter), tk.f0, 40), `${topGroup(tkAfter).name}, ${f(tkAfter).toFixed(1)} Hz (point ${tk.f0.toFixed(1)} Hz)`);
-await page.screenshot({ path: shots + 'motion-03-adjusted.png' });
+check('Clear map asks first; saying no changes nothing', dialogs.length === 1 && /Your recordings are kept/.test(dialogs[0]) && d.onMap.length === 2 && !d.project.takes[0].hidden, dialogs[0] && dialogs[0].replace(/\s+/g, ' '));
+dialogAnswer = true;
+await page.locator('.pm-clear-btn').click();
+d = await dbg();
+check('Clear map (confirmed) removes every placed sound and take from the map', d.onMap.length === 0 && d.project.takes.every((t) => t.hidden) && d.blend.weights.length === 0 && d.emptyShown, d.mapMsg);
+check('…but keeps the recordings, ready to place again', d.project.sounds.length === 2 && d.project.takes.length === 1 && await page.locator('.pm-sounds .pm-place', { hasText: 'Place on map' }).count() === 2 && await page.locator('.pm-take-toggle', { hasText: 'Put back on map' }).count() === 1);
+await page.screenshot({ path: shots + 'motion-04-cleared.png' });
+await page.locator(`.pm-row[data-id="${sound(d, 'ee').id}"] .pm-place`).click();
+await page.locator('.pm-add .pm-click-btn').click();
+await clickMap(0.85, 0.5);
+await page.locator('.pm-take-toggle').click();
+d = await dbg();
+check('A cleared recording and a take can be put back on the map', d.onMap.length === 1 && d.onMap[0].name === 'ee' && !d.project.takes[0].hidden);
+await page.locator('.pm-add button', { hasText: 'Done' }).click();
+dialogs = [];
+await page.locator(`.pm-row[data-id="${sound(d, 'ah').id}"] .pm-del-rec`).click();
+d = await dbg();
+check('🗑 Delete recording (confirmed) removes that recording only', dialogs.length === 1 && /cannot be undone/.test(dialogs[0]) && d.project.sounds.length === 1 && d.project.sounds[0].name === 'ee' && d.onMap.length === 1);
+await page.locator('.pm-clear-btn').click();
+await page.locator('.pm-add-btn').click();
+await record('oo', [260, 'hum']);
+await page.locator('.pm-add .pm-to-place').click();
+await page.locator('.pm-add .pm-click-btn').click();
+await page.locator('.pm-add button', { hasText: 'Close' }).click();
+d = await dbg();
+check('Closing the panel in placement mode keeps the new recording (unplaced) and leaves placement mode', !d.flow && d.mode === 'play' && sound(d, 'oo') && sound(d, 'oo').place === null && d.emptyShown);
+await page.locator(`.pm-row[data-id="${sound(d, 'oo').id}"] .pm-place`).click();
+await page.locator('.pm-add .pm-click-btn').click();
+await clickMap(0.2, 0.2);
+await page.locator(`.pm-row[data-id="${sound(d, 'ee').id}"] .pm-place`).click();
+await page.locator('.pm-add .pm-click-btn').click();
+await clickMap(0.8, 0.8);
+await page.locator('.pm-add button', { hasText: 'Done' }).click();
 
-// tweaks afterwards
-await page.locator('.pm-tune summary').click();
-const c1 = (await dbg()).project.cal.bend;
-await page.locator('.pm-tune-row[data-axis="bend"] .pm-widen').click();
-const c2 = (await dbg()).project.cal.bend;
-check('“Small moves jump too far” widens that range (less sensitive)', c2.hi - c2.lo > (c1.hi - c1.lo) * 1.2, `${c1.lo}–${c1.hi} → ${c2.lo}–${c2.hi}`);
-await page.locator('.pm-tune-row[data-axis="lift"] .pm-narrow').click();
-await page.locator('.pm-tune-row[data-axis="lift"] .pm-narrow').click();
-await page.locator('.pm-tune-row[data-axis="lift"] .pm-narrow').click();
+// ── 9. range ──
 d = await dbg();
-check('Narrowing a lot flags sounds whose pose is now outside the range', d.anchorsOnMap.some((a) => a.outside) && /Outside the new range/.test(d.rangeMsg), d.anchorsOnMap.filter((a) => a.outside).map((a) => a.name).join(', '));
-await page.locator('.pm-tune-row[data-axis="lift"] input[aria-label*="end"]').evaluate((el) => { el.value = '150'; el.dispatchEvent(new Event('change')); });
-d = await dbg();
-check('The range-end slider sets that end', d.project.cal.lift.hi === 150, JSON.stringify(d.project.cal.lift));
-await page.getByRole('button', { name: /Undo range change/ }).click();
-d = await dbg();
-check('Undo range change goes back one step', d.project.cal.lift.hi !== 150, JSON.stringify(d.project.cal.lift));
-
-// adjust with tracking lost: nothing changes
-const calKeep = JSON.stringify((await dbg()).project.cal);
+const ooPose = sound(d, 'oo').place.angles;
+const rangeTxt = await page.locator('.pm-range').textContent();
+check('Range instructions use the same axis words (straighter/more bent arm, arm down/raised)', /RIGHT elbow/.test(rangeTxt) && /LEFT arm/.test(rangeTxt) && /straighter arm/.test(rangeTxt) && /more bent arm/.test(rangeTxt) && /arm down/.test(rangeTxt) && /arm raised/.test(rangeTxt));
+const dotsBefore = d.onMap;
 await page.getByRole('button', { name: /Adjust to my movement/ }).click();
 await wait(3200);
-await page.evaluate(() => { window.__feedOn = false; });
+const t0 = Date.now();
+while (Date.now() - t0 < 6000) { const u = (Date.now() - t0) / 6000; await pose({ bend: 40 + 75 * (0.5 - 0.5 * Math.cos(u * 6 * Math.PI)), lift: 25 + 95 * (0.5 - 0.5 * Math.cos(u * 4 * Math.PI)) }); await wait(30); }
 await notBusy();
-await page.evaluate(() => { window.__feedOn = true; });
 d = await dbg();
-check('Adjust with tracking lost changes nothing and says why', JSON.stringify(d.project.cal) === calKeep && /camera readings/.test(d.rangeMsg), d.rangeMsg);
+check("Adjust estimates the range I actually used", d.project.calSource === 'adjusted' && Math.abs(d.project.cal.bend.lo - 40) < 6 && Math.abs(d.project.cal.bend.hi - 115) < 6 && Math.abs(d.project.cal.lift.lo - 25) < 6 && Math.abs(d.project.cal.lift.hi - 120) < 6, JSON.stringify(d.project.cal));
+const movedOo = Math.hypot(dotsBefore.find((a) => a.name === 'oo').pos.x - d.onMap.find((a) => a.name === 'oo').pos.x, dotsBefore.find((a) => a.name === 'oo').pos.y - d.onMap.find((a) => a.name === 'oo').pos.y);
+await page.getByRole('button', { name: /Start sound/ }).click();
+await pose(ooPose); await wait(600);
+const ooAfter = await dbg();
+check('After adjusting, dots move but the same pose still plays the same sound', movedOo > 0.03 && topGroup(ooAfter).name === 'oo' && near(f(ooAfter), 260, 10), `oo dot moved ${movedOo.toFixed(3)}; ${f(ooAfter).toFixed(1)} Hz`);
+await page.getByRole('button', { name: /Stop sound/ }).click();
+await page.getByRole('button', { name: /Undo range change/ }).click();
 
-// reload: everything persists, still lined up
+// reload
+const keep = JSON.stringify((await dbg()).project);
 await page.reload();
 await page.waitForFunction(() => window.__poseMap);
 await page.evaluate(() => { window.__feedOn = true; });
 d = await dbg();
-check('After reload: sounds, take and range are kept', d.project.anchors.some((a) => a.name === 'Hum') && d.project.takes.length === 1 && JSON.stringify(d.project.cal) === calKeep);
-await page.getByRole('button', { name: /Start sound/ }).click();
-await pose(humPose); await wait(700);
-d = await dbg();
-check('After reload: the Hum pose still plays the hum', topGroup(d).name === 'Hum' && near(f(d), 233, 10), `${f(d).toFixed(1)} Hz`);
-check('After reload: ▶ Original is still available for my recording (stored in this browser)', await page.locator('.pm-row[data-id] button', { hasText: 'Original' }).count() >= 1);
-await page.getByRole('button', { name: /Stop sound/ }).click();
+check('After reload: recordings, placements, take and range are kept', JSON.stringify(d.project) === keep && d.onMap.length === 2);
+check('After reload: ▶ Original is still available (audio stored in this browser)', await page.locator('.pm-row[data-id] button', { hasText: 'Original' }).count() >= 1);
 
-// ── tour ──
+// ── 10. tour ──
+const before = JSON.stringify(d.project);
 await page.getByRole('button', { name: '🧭 Tour' }).click();
 await wait(300);
 const steps = [];
@@ -414,37 +430,40 @@ for (let i = 0; i < 30; i++) {
   await page.locator('.tour-pop').getByRole('button', { name: /Next/ }).click();
   await wait(200);
 }
-const need = ['Turn on the camera', 'Try the starter sounds', 'Record a steady sound', 'Check what the app heard', 'Assign it to a pose', 'Play it with your arms', 'Draw + record a take', 'Undo a take', 'Move between your sounds', 'Optional: adjust to my movement'];
-check('Tour walks through camera, starters, recording, assigning a pose, drawing a take and playing by movement', need.every((t) => steps.some((s) => s.title === t)), steps.map((s) => s.title).join(' → '));
+const titles = steps.map((s) => s.title);
+const order = ['An empty map to fill with your sounds', '1. Record', '2. Listen', '3. Place: click a spot or use your pose', '4. Ready', 'Bend only your right elbow', 'Lift only your left arm', 'Both arms together', 'Optional: adjust to my movement', 'Clear map, keep recordings'];
+check('Tour starts at the empty board, then record → listen → place → ready, each arm alone, then both, range, Clear map', order.every((t, i) => titles.indexOf(t) >= 0 && (i === 0 || titles.indexOf(t) > titles.indexOf(order[i - 1]))) && titles[0] === order[0], titles.join(' → '));
 check('Every tour step highlights a real control', steps.every((s) => s.hole), steps.filter((s) => !s.hole).map((s) => s.title).join(', ') || `all ${steps.length} highlighted`);
 await page.locator('.tour-pop').getByRole('button', { name: /Back/ }).click();
-check('Back goes to the previous step', (await page.locator('.tour-title').textContent()) === steps[steps.length - 2].title);
+check('Back goes to the previous step', (await page.locator('.tour-title').textContent()) === titles[titles.length - 2]);
 await page.locator('.tour-pop').getByRole('button', { name: 'Next →' }).click();
 await page.locator('.tour-pop').getByRole('button', { name: 'Done' }).click();
 d = await dbg();
-check('Done closes the tour; it can be reopened at step 1 and closed', !d.tourOpen && await page.locator('.tour-pop').count() === 0 && await (async () => { await page.getByRole('button', { name: '🧭 Tour' }).click(); const z = await dbg(); await page.locator('.tour-pop').getByRole('button', { name: 'Close' }).click(); return z.tourOpen && z.tourStep === 0 && !(await dbg()).tourOpen; })());
-check('The tour itself did not record, play or change sounds', d.project.anchors.length === 6 && !d.soundOn && !d.busy);
+check('The tour did not record, place, clear or play anything', !d.tourOpen && JSON.stringify(d.project) === before && !d.soundOn && !d.busy);
 await page.locator('.pm-add button', { hasText: 'Close' }).click().catch(() => {});
 
-// phone width: no horizontal scroll
+// phone width
 await page.setViewportSize({ width: 390, height: 844 });
 await wait(300);
 const sw = await page.evaluate(() => document.documentElement.scrollWidth);
 check('Phone width (390 px): no horizontal page scroll', sw <= 392, `scrollWidth ${sw}`);
-await page.screenshot({ path: shots + 'motion-04-phone.png', fullPage: false });
+await page.locator('svg.pm-square').scrollIntoViewIfNeeded();
+await page.screenshot({ path: shots + 'motion-05-phone.png' });
 await page.setViewportSize({ width: 1440, height: 1300 });
 
-// ── real camera + MediaPipe on Chromium's fake camera (no person) ──
-await page.evaluate(() => { window.__feedOn = false; });
+// empty-board screenshot (fresh project)
+await page.evaluate(() => { window.__feedOn = false; localStorage.removeItem('poseMap.project.v1'); });
 await page.reload();
 await page.waitForFunction(() => window.__poseMap);
+await page.screenshot({ path: shots + 'motion-00-empty.png' });
+
+// real camera + MediaPipe on Chromium's fake camera (no person)
 await page.getByRole('button', { name: /Enable camera/ }).click();
 const camOk = await page.waitForFunction(() => ['running', 'error'].includes(window.__poseMap.debug().camera), null, { timeout: 60000 }).then(() => true).catch(() => false);
 await wait(2500);
 d = await dbg();
-check('Real camera + MediaPipe pose model load from this site and run', camOk && d.camera === 'running' && d.fps > 0, `${d.cameraMsg} ${d.fps} frames/s`);
+check('Real camera + MediaPipe pose model load and run', camOk && d.camera === 'running' && d.fps > 0, `${d.cameraMsg} ${d.fps} frames/s`);
 check('With no person in view (test pattern), nothing is tracked', !d.tracking && /No person|No camera frames|Lost/.test(d.lostText), d.lostText);
-await page.screenshot({ path: shots + 'motion-05-real-camera.png' });
 
 for (const [route, sel] of [['#/vowel-morph', () => window.__vowelMorph], ['#/motion-score', () => document.querySelector('h1')], ['#/frequency', () => document.querySelector('h1')]]) {
   await page.goto(url + route);
