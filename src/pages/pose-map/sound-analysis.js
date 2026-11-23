@@ -11,9 +11,11 @@
 //   • a plain-language reason + tip when no usable estimate came out, and
 //   • unvoiced fricatives ("sss", "shh", "fff"): when there is no pitch, the
 //     recording is checked for fricative-like noise and, if it is one, kept
-//     as a NOISE sound (its noise spectrum, no f0; see pose-sound.js).
-import { analyzeVowel } from '../frequency/auto-vowel.js';
-import { noiseSpectrum, classifyNoise, strongestBand } from './pose-sound.js';
+//     as a NOISE sound (its noise spectrum, no f0; see pose-sound.js),
+//   • sounds with both (a voiced fricative such as a steady "zzz"): when a
+//     pitch is found AND strong high noise sits between its harmonics, both
+//     parts are kept (kind 'mixed': f0 + harmonics, noise bands, voiced share).
+import { noiseSpectrum, classifyNoise, strongestBand, mixedPart, findPitch } from './pose-sound.js';
 import { MAX_HARMONICS } from '../frequency/vowel-model.js';
 
 export const REC_SEC = 3;
@@ -30,7 +32,7 @@ export function steadySection(durSec) {
 const TIPS = {
   silent: 'I could not hear anything. Check that the right microphone is selected and allowed, move a little closer, and make the sound for the whole 3 seconds.',
   'not-periodic': 'The sound had no clear, steady pitch and was not a clear hiss either. Pitched sounds that work: sung vowels (“ah”, “ee”, “oo”), humming (“mmm”). Unvoiced fricatives that work: a steady “sss”, “shh” or “fff” close to the microphone. Clicks, speech, voiced fricatives (“zzz”, “vvv”) and noisy rooms cannot be rebuilt.',
-  mixed: 'Make either one steady pitched sound (a vowel or a hum) or one steady unvoiced hiss (“sss”, “shh”, “fff”), not a mix. Voiced fricatives like “zzz” and “vvv” are not supported yet.',
+  mixed: 'Make either one steady pitched sound (a vowel or a hum) or one steady unvoiced hiss (“sss”, “shh”, “fff”), not a mix. A voiced fricative (“zzz”, “vvv”) works when its buzz has a steady pitch; this one did not have one.',
   'low-noise': 'For a fricative, hiss steadily (“sss”, “shh”, “fff”) a hand’s width from the microphone, without blowing on it.',
   'few-harmonics': 'A pitch was found, but almost no harmonics stood out above the noise, so there is nothing to rebuild the sound from. Try a little louder and fuller (an open “ah” or a strong hum), away from fans or music.',
   'too-short': 'The recording was too short to measure. Keep the sound going for the whole countdown.',
@@ -49,7 +51,7 @@ export function analyzeMySound(rec) {
   const section = steadySection(dur);
   const from = Math.round(section.start * rec.sampleRate);
   const to = Math.round(section.end * rec.sampleRate);
-  const r = analyzeVowel(rec.samples, rec.sampleRate, { from, to });
+  const r = findPitch(rec.samples, rec.sampleRate, { from, to });
   const amps = r.amps ? r.amps.slice(0, MAX_HARMONICS) : null;
   const usable = r.status !== 'failed' && Number.isFinite(r.f0) && r.f0 > 0 && amps && amps.some((a) => a > 0);
   const warnings = (r.warnings || []).filter((w) => w.code !== 'manual').map((w) => w.code);
@@ -97,6 +99,13 @@ export function analyzeMySound(rec) {
     strongest: r.strongest || null,
     warnings,
   };
+  const m = mixedPart(rec.samples, rec.sampleRate, r.f0, { from, to });
+  if (m) {
+    summary.kind = 'mixed';
+    summary.noiseShare = Math.round(m.noiseShare * 100) / 100;
+    summary.strongestBand = strongestBand(m.bands);
+    return { ok: true, analysis: { kind: 'mixed', status: r.status === 'warning' ? 'warning' : 'ok', f0: r.f0, amps, voiced: m.voiced, noise: { bands: m.bands }, summary }, section, code: null, reason: '', tip: '', warnings };
+  }
   return { ok: true, analysis: { kind: 'pitched', status: r.status === 'warning' ? 'warning' : 'ok', f0: r.f0, amps, summary }, section, code: null, reason: '', tip: '', warnings };
 }
 

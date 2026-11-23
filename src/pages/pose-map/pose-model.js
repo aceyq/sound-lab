@@ -417,6 +417,11 @@ export function cleanAnalysis(an) {
   const amps = new Array(MAX_HARMONICS).fill(0);
   for (let i = 0; i < MAX_HARMONICS && i < an.amps.length; i++) { const v = Number(an.amps[i]); amps[i] = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0; }
   if (!amps.some((v) => v > 0)) return null;
+  if (an.kind === 'mixed' && an.noise && Array.isArray(an.noise.bands)) {
+    const bands = cleanBands(an.noise.bands);
+    const v = Number(an.voiced);
+    if (bands.some((b) => b > 0)) return { kind: 'mixed', status: an.status === 'warning' ? 'warning' : 'ok', f0, amps, voiced: Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.5, noise: { bands }, ...sm };
+  }
   return { kind: 'pitched', status: an.status === 'warning' ? 'warning' : 'ok', f0, amps, ...sm };
 }
 
@@ -455,7 +460,7 @@ export function takeToAngles(take, cal) {
   return {
     ...take,
     path: take.path.map((p) => ({ ...A(p), t: p.t })),
-    points: take.points.map((p) => ({ ...A(p), t: p.t, f0: p.f0, amps: p.amps, status: p.status })),
+    points: take.points.map((p) => ({ ...A(p), t: p.t, kind: p.kind || 'pitched', voiced: p.voiced ?? 1, f0: p.f0, amps: p.amps, bands: p.bands || null, status: p.status })),
   };
 }
 
@@ -466,7 +471,7 @@ export function poseTakeAnchors(takes, cal = DEFAULT_CAL) {
     if (take.hidden) continue;
     take.points.forEach((p, i) => out.push({
       id: `${take.id}#${i}`, takeId: take.id, name: `${take.name} · ${(p.t / 1000).toFixed(1)} s`,
-      angles: { bend: p.bend, lift: p.lift }, pos: anglesToPoint(p, cal), analysis: { status: 'ok', f0: p.f0, amps: p.amps },
+      angles: { bend: p.bend, lift: p.lift }, pos: anglesToPoint(p, cal), analysis: { status: 'ok', kind: p.kind || 'pitched', voiced: p.voiced ?? 1, f0: p.f0, amps: p.amps, bands: p.bands || null },
     }));
   }
   return out;
@@ -476,8 +481,24 @@ export function cleanPoseTake(t) {
   if (!t || typeof t !== 'object') return null;
   const num = (v) => Number.isFinite(+v);
   const amps = (a) => { const out = new Array(MAX_HARMONICS).fill(0); for (let i = 0; i < MAX_HARMONICS && i < a.length; i++) { const v = Number(a[i]); out[i] = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0; } return out; };
-  const points = (Array.isArray(t.points) ? t.points : []).filter((p) => p && num(p.bend) && num(p.lift) && num(p.f0) && +p.f0 > 0 && Array.isArray(p.amps))
-    .map((p) => ({ bend: +p.bend, lift: +p.lift, t: num(p.t) ? +p.t : 0, f0: +p.f0, amps: amps(p.amps), status: p.status === 'warning' ? 'warning' : 'ok' }));
+  // A point is pitched (f0 + harmonics), noise (bands, no f0) or mixed (both, voiced share 0…1).
+  const okPoint = (p) => {
+    if (!p || !num(p.bend) || !num(p.lift)) return false;
+    const pitched = num(p.f0) && +p.f0 > 0 && Array.isArray(p.amps);
+    const noisy = Array.isArray(p.bands) && p.bands.some((v) => +v > 0);
+    if (p.kind === 'noise') return noisy;
+    if (p.kind === 'mixed') return pitched && noisy;
+    return pitched;
+  };
+  const points = (Array.isArray(t.points) ? t.points : []).filter(okPoint).map((p) => {
+    const kind = p.kind === 'noise' || p.kind === 'mixed' ? p.kind : 'pitched';
+    return {
+      bend: +p.bend, lift: +p.lift, t: num(p.t) ? +p.t : 0, kind,
+      voiced: kind === 'noise' ? 0 : kind === 'mixed' ? Math.max(0, Math.min(1, num(p.voiced) ? +p.voiced : 0.5)) : 1,
+      f0: kind === 'noise' ? null : +p.f0, amps: kind === 'noise' ? new Array(MAX_HARMONICS).fill(0) : amps(p.amps),
+      bands: kind === 'pitched' ? null : cleanBands(p.bands), status: p.status === 'warning' ? 'warning' : 'ok',
+    };
+  });
   const path = (Array.isArray(t.path) ? t.path : []).filter((p) => p && num(p.bend) && num(p.lift) && num(p.t)).map((p) => ({ bend: +p.bend, lift: +p.lift, t: +p.t }));
   const s = t.stats || {};
   return {
@@ -487,8 +508,11 @@ export function cleanPoseTake(t) {
     createdAt: t.createdAt || new Date().toISOString(),
     durationSec: num(t.durationSec) ? +t.durationSec : 0,
     path, points,
-    stats: { snippets: +s.snippets || 0, usable: points.length, silent: +s.silent || 0, unreliable: +s.unreliable || 0, outsidePath: +s.outsidePath || 0 },
+    stats: { snippets: +s.snippets || 0, usable: points.length, pitched: points.filter((q) => q.kind === 'pitched').length, mixed: points.filter((q) => q.kind === 'mixed').length, noise: points.filter((q) => q.kind === 'noise').length, silent: +s.silent || 0, unreliable: +s.unreliable || 0, outsidePath: +s.outsidePath || 0 },
     hidden: t.hidden === true,
+    // 1 = analyzed pitch-only (noisy snippets were skipped); 2 = pitched + noise
+    analysisVersion: +t.analysisVersion === 2 ? 2 : 1,
+    ...(num(t.startOffsetMs) ? { startOffsetMs: +t.startOffsetMs } : {}),
   };
 }
 

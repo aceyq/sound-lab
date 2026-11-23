@@ -573,6 +573,105 @@ await page.locator('svg.pm-square').scrollIntoViewIfNeeded();
 await page.screenshot({ path: shots + 'motion-05-phone.png' });
 await page.setViewportSize({ width: 1440, height: 1300 });
 
+// ── 11. drawn fricative line ↔ vowel dot (round 4) ──
+await page.evaluate(() => { localStorage.removeItem('poseMap.project.v1'); localStorage.removeItem('poseMap.project.backup-before-take-reanalysis'); });
+await page.reload();
+await page.waitForFunction(() => window.__poseMap);
+await page.evaluate(() => { window.__feedOn = true; });
+await page.locator('.pm-add-btn').click();
+await record('ah', [196, 'ah']);
+await page.locator('.pm-add .pm-to-place').click();
+await page.locator('.pm-add .pm-click-btn').click();
+await clickMap(0.15, 0.5);
+await page.locator('.pm-add button', { hasText: 'Done' }).click();
+await page.getByRole('button', { name: /Draw \+ record/ }).click();
+await page.waitForFunction(() => window.__poseMap.debug().micListening, null, { timeout: 5000 });
+async function drawLine(x0, y0, x1, y1, sec, voice) {
+  box = await mapBox();
+  await page.evaluate(([fq, r]) => (fq === 'noise' ? window.__fakeVoice.noise(r) : window.__fakeVoice.set(fq, r)), voice);
+  await wait(150);
+  await page.mouse.move(...toPx(x0, y0));
+  await page.mouse.down();
+  const t0 = Date.now();
+  for (;;) {
+    const u = Math.min(1, (Date.now() - t0) / (sec * 1000));
+    await page.mouse.move(...toPx(x0 + u * (x1 - x0), y0 + u * (y1 - y0)));
+    if (u >= 1) break;
+    await wait(12);
+  }
+  await page.mouse.up();
+  await page.evaluate(() => window.__fakeVoice.set(0));
+  await page.waitForFunction(() => !window.__poseMap.debug().drawing && /learned \d+ point/.test(window.__poseMap.debug().drawStatus), null, { timeout: 20000 });
+}
+await drawLine(0.85, 0.15, 0.85, 0.85, 2.4, ['noise', 'sss']);
+await page.getByRole('button', { name: /Draw \+ record/ }).click();
+d = await dbg();
+const fTake = d.project.takes[0];
+const nNoise = fTake.points.filter((p) => p.kind === 'noise').length;
+check('A line drawn while hissing “sss” saves NOISE dots (noise spectrum, no f0) instead of skipping them', fTake.analysisVersion === 2 && nNoise >= 12 && nNoise === fTake.points.length && fTake.points.every((p) => p.f0 === null && p.bands && p.bands.length === 24) && Number.isFinite(fTake.startOffsetMs),
+  `${nNoise} noise dots of ${fTake.stats.snippets} snippets; ${d.drawStatus.slice(0, 160)}`);
+check('The take status names the kinds and that the line counts as one source', /noise only \(fricative\)/.test(d.drawStatus) && /one source/.test(d.drawStatus) && !/skipped, not learned/.test(d.drawStatus));
+check('Noise dots are drawn as hollow rings on the map', await page.locator('.pm-take-pt.noise').count() === nNoise);
+const cal4 = d.project.cal;
+const ahPose = sound(d, 'ah').place.angles;
+const lineBend = fTake.points.reduce((s, p) => s + p.bend, 0) / fTake.points.length;
+await page.getByRole('button', { name: /Start sound/ }).click();
+const walk = [];
+for (let i = 0; i <= 8; i++) {
+  const bend = ahPose.bend + (i / 8) * (lineBend - ahPose.bend);
+  await pose({ bend, lift: ahPose.lift }); await wait(i === 0 ? 900 : 650);
+  walk.push(await dbg());
+}
+const nz = walk.map((x) => x.blend.params.noise);
+const out = walk.map((x) => x.audio.output);
+const ton = out.map((o) => (o ? o.tonalShare : NaN));
+check('Every step plays ONE synth; the drawn line is ONE source in the weights (not one per dot)', walk.every((x) => x.audio.kind === 'synth' && x.blend.weights.filter((w) => w.type === 'take').length === 1 && x.blend.weights.length === 2 && Math.abs(x.blend.weights.reduce((s, w) => s + w.weight, 0) - 1) < 1e-9));
+check('At the vowel dot: the pitched part only (noise part under 1 %), 196 Hz', nz[0] < 0.01 && near(walk[0].blend.params.f0, 196, 10) && walk[0].audio.parts.noise < 0.1, `noise ${(nz[0] * 100).toFixed(2)} %`);
+check('On the fricative line: the noise part only (pitched part under 1 %)', nz[8] > 0.99 && walk[8].audio.parts.harm < 0.1 && /no pitch/.test(walk[8].shown.f0), `noise ${(nz[8] * 100).toFixed(1)} %`);
+check('In between: a gradual transition (noise share rises step by step, several in-between mixes)', nz.every((v, i) => i === 0 || v >= nz[i - 1] - 1e-6) && nz.filter((v) => v > 0.1 && v < 0.9).length >= 3, nz.map((v) => `${(v * 100).toFixed(0)}%`).join(' → '));
+check('Shown shares are the synth’s weights: the noise column adds up to the noise part the synth plays', walk.every((x) => Math.abs(x.blend.weights.reduce((s, w) => s + w.noise, 0) - x.blend.params.noise) < 1e-9 && Math.abs(x.audio.params.noise - x.blend.params.noise) < 0.02));
+check('Pitched and noise levels are shown (shares and gains)', /Pitched \(harmonic\) part/.test(walk[4].shownLevels) && /Noise part/.test(walk[4].shownLevels) && /gain/.test(walk[4].shownLevels), walk[4].shownLevels.slice(0, 200));
+check('MEASURED output: at the vowel the energy sits on the harmonics of f0, on the line it is noise, in between it is in between',
+  ton[0] > 0.85 && ton[8] < 0.15 && ton[4] > ton[8] + 0.1 && ton[4] < ton[0] - 0.1 && out[8].highShare > 0.6 && out[0].rmsDb > -40 && out[8].rmsDb > -40,
+  ton.map((v) => (Number.isFinite(v) ? `${(v * 100).toFixed(0)}%` : '—')).join(' → ') + ` tonal; line high-freq share ${out[8] && (out[8].highShare * 100).toFixed(0)} %; levels ${out.map((o) => o && o.rmsDb.toFixed(0)).join('/')} dBFS`);
+// how much the line would have weighed with every dot counted on its own (the old way)
+const toP = (a) => ({ x: (a.bend - cal4.bend.lo) / (cal4.bend.hi - cal4.bend.lo), y: (a.lift - cal4.lift.lo) / (cal4.lift.hi - cal4.lift.lo) });
+const here4 = toP({ bend: ahPose.bend + 0.5 * (lineBend - ahPose.bend), lift: ahPose.lift });
+const pw = d.project.power;
+const inv = (q) => Math.hypot(q.x - here4.x, q.y - here4.y) ** -pw;
+const oldShare = fTake.points.reduce((s, p) => s + inv(toP(p)), 0) / (inv(toP(ahPose)) + fTake.points.reduce((s, p) => s + inv(toP(p)), 0));
+const newShare = walk[4].blend.weights.find((w) => w.type === 'take').weight;
+check('Half-way, the dense line no longer drowns the vowel dot', newShare < 0.65 && oldShare > newShare + 0.2, `line share now ${(newShare * 100).toFixed(0)} % (counting its ${fTake.points.length} dots separately would give ${(oldShare * 100).toFixed(0)} %)`);
+await page.locator('.pm-wdetails summary').click();
+await wait(400);
+const rowsTxt = await page.locator('.pm-wtable tbody tr').allTextContents();
+check('“Detailed breakdown” lists each source with its pitched/noise split and where on the line it is taken', rowsTxt.length === 2 && rowsTxt.some((t) => /Take 1 \(drawn\)/.test(t) && /s into the take/.test(t) && /noise/.test(t)), rowsTxt.join(' | ').slice(0, 300));
+await page.locator('.pm-sound').scrollIntoViewIfNeeded();
+await page.screenshot({ path: shots + 'motion-06-fricative-line.png', fullPage: false });
+await page.getByRole('button', { name: /Stop sound/ }).click();
+
+// an older take, analyzed pitch-only (its "sss" was skipped), is analyzed again from its stored recording
+const ahBefore = JSON.stringify(sound(d, 'ah'));
+await page.evaluate(() => {
+  const p = JSON.parse(localStorage.getItem('poseMap.project.v1'));
+  const t = p.takes[0];
+  t.analysisVersion = 1; delete t.startOffsetMs; t.stats = { snippets: t.stats.snippets, usable: 0, silent: 0, unreliable: t.stats.snippets };
+  t.points = [];
+  p.takes.push({ ...JSON.parse(JSON.stringify(t)), id: 'take-gone', name: 'Take 2', recordingId: 'rec-not-stored' });
+  localStorage.setItem('poseMap.project.v1', JSON.stringify(p));
+});
+await page.reload();
+await page.waitForFunction(() => window.__poseMap && window.__poseMap.debug().takeUpgrade.length > 0, null, { timeout: 10000 }).catch(() => {});
+d = await dbg();
+const up = d.project.takes.find((t) => t.name === 'Take 1');
+const gone = d.project.takes.find((t) => t.name === 'Take 2');
+const takesBackup = await page.evaluate(() => JSON.parse(localStorage.getItem('poseMap.project.backup-before-take-reanalysis') || 'null'));
+check('An old pitch-only fricative take is analyzed again from its stored recording: it now has noise dots', up.analysisVersion === 2 && up.points.filter((p) => p.kind === 'noise').length >= nNoise - 3 && /Analyzed your earlier drawn take/.test(d.drawStatus) && takesBackup && takesBackup.takes[0].points.length === 0,
+  `${up.points.length} dots now (${nNoise} when first recorded); ${d.drawStatus.slice(0, 200)}`);
+const goneFlag = await page.locator(`.pm-take-row[data-take-id="${gone.id}"] .pm-flag`).textContent().catch(() => '');
+check('A take whose recording is not stored is flagged “Record it again”, and left as it was', gone.analysisVersion === 1 && /Record it again/.test(goneFlag), goneFlag);
+check('Other recordings are untouched by the re-analysis', JSON.stringify(sound(d, 'ah')) === ahBefore);
+
 // empty-board screenshot (fresh project)
 await page.evaluate(() => { window.__feedOn = false; localStorage.removeItem('poseMap.project.v1'); });
 await page.reload();

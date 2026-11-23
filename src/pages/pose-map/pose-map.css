@@ -39,6 +39,9 @@
 .pm-anchor .pm-out-ring { fill: none; stroke: #ffa657; stroke-width: 4; stroke-dasharray: 8 6; }
 .pm-take-path { fill: none; stroke-width: 6; stroke-opacity: 0.55; stroke-linecap: round; stroke-linejoin: round; }
 .pm-take-pt { stroke: #0b0f14; stroke-width: 2; }
+.pm-take-pt.pitched { stroke: #0b0f14; }
+.pm-take-pt.noise { stroke-width: 3; }
+.pm-take-pt.mixed { fill-opacity: 0.45; stroke-width: 3; }
 .pm-take-start { stroke: #fff; stroke-width: 3; }
 .pm-live-path { fill: none; stroke: #ff7b72; stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; }
 .pm-square.placing { cursor: crosshair; outline: 3px dashed #ffd866; }
@@ -58,6 +61,9 @@
 .pm-wname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pm-wbar { height: 8px; background: var(--card-2); border-radius: 4px; overflow: hidden; }
 .pm-wbar span { display: block; height: 100%; }
+.pm-wrow .pm-wbar { display: flex; }
+.pm-wbar .pm-wbar-n { opacity: 0.85; background-image: repeating-linear-gradient(45deg, rgba(0,0,0,0.45) 0 3px, transparent 3px 6px); }
+.pm-wkind { font-size: 0.85em; }
 .pm-swatch { display: inline-block; width: 14px; height: 14px; border-radius: 50%; }
 .pm-clap-box { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: grid; gap: 6px; justify-items: start; }
 .pm-clap-flash { padding: 4px 10px; border-radius: 6px; background: var(--card-2); }
@@ -154,3 +160,16 @@
 .pm-noise { width: 100%; height: 110px; display: block; }
 .pm-flag { flex-basis: 100%; margin: 2px 0 4px; padding: 6px 8px; border-radius: 6px; background: #3a2d14; border: 1px solid #7a5a1c; font-size: 0.9em; }
 .pm-bend-note { font-size: 0.85em; min-height: 1.1em; }
+
+.pm-one-source { margin: 4px 0; }
+.pm-wdetails { margin: 4px 0 8px; }
+.pm-wdetails summary { cursor: pointer; }
+.pm-wtable { width: 100%; border-collapse: collapse; font-size: 0.85em; margin-top: 4px; }
+.pm-wtable th, .pm-wtable td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--card-2); vertical-align: top; }
+.pm-wtable .pm-swatch { margin-right: 4px; }
+.pm-levels { margin: 4px 0 8px; }
+.pm-level { display: grid; grid-template-columns: minmax(110px, 160px) 1fr auto; gap: 8px; align-items: center; font-size: 0.9em; margin: 2px 0; }
+.pm-level.harm .pm-wbar span { background: #ffcb6b; }
+.pm-level.noise .pm-wbar span { background: #c3a6ff; }
+.pm-measured { font-size: 0.85em; margin-top: 2px; }
+@media (max-width: 520px) { .pm-level { grid-template-columns: 1fr; } .pm-wtable th:nth-child(5), .pm-wtable td:nth-child(5) { display: none; } }

@@ -3190,6 +3190,69 @@ What still needs me with a real camera and microphone:
 - Does the vowel-to-fricative mix sound like one sound?
 - Are any of my earlier recordings flagged after loading?
 
+### Motion Morph follow-up: fricatives on drawn lines
+
+Prompt (verbatim, sent November 23, 2026 UTC). ChatGPT helped me draft it:
+
+<details>
+<summary>Full prompt</summary>
+
+```text
+I drew a line while recording a fricative, but when I move my arms between that line and my recorded vowels, I can’t hear a vowel-to-fricative blend. Please investigate and fix this in Motion Morph.
+
+Check the complete path: recording along the line → analyzing each snippet → saving its sound parameters → calculating the blend at my current arm position → producing the audio. Is the drawn-line feature still only analyzing fundamental frequency and harmonics? Are noisy snippets being skipped, incorrectly treated as vowels, or saved without the noise information?
+
+I need both individual dots and drawn recordings to support vowels and fricatives. For a vowel, capture the pitched/harmonic part. For an unvoiced fricative like “shh,” capture its noise spectrum or filter shape without requiring a reliable pitch. For sounds containing both, preserve both parts.
+
+When I move between them, synthesize the blended harmonic and noise components together, using the map’s contribution weights. Don’t just crossfade the original recordings. Near a vowel, I should hear mostly its reconstructed pitched sound; near the fricative line, mostly its reconstructed noise; between them, a gradual transition.
+
+Check whether the many closely spaced points along a drawn line overwhelm individual vowel dots. Explain how their combined influence is handled, and make the contribution display understandable by grouping points by recording/take, with an optional detailed breakdown.
+
+Make sure the displayed percentages match the weights actually used for synthesis. Also show the resulting harmonic and noise levels so I can understand what is changing.
+
+Check my existing fricative take. If its saved analysis lacks the necessary information, reanalyze the stored audio if available; otherwise clearly tell me to record it again. Preserve my other recordings.
+
+Test the actual audio output, including vowel-only, fricative-only, and intermediate positions, rather than only checking that dots and percentages appear. Tell me which checks were simulated and what I still need to listen to myself.
+
+Add this prompt and a short, accurate summary to AI_USE.md, crediting ChatGPT for helping draft it. Commit, push, verify deployment, and send me the updated link.
+```
+
+</details>
+
+What was wrong (Claude traced the whole path in the code):
+- **Drawn lines only analyzed pitch.** Each 0.2 s snippet of a drawn take went through Vowel Morph's take analysis, which only keeps snippets with a clear fundamental. A "shh" or "sss" snippet was counted as "without a reliable pitch" and skipped, so a fricative line saved no noise information at all. Nothing was treated as a vowel by mistake; the noise was just thrown away. Single recorded dots already handled fricatives since the last round.
+- **Dense lines drowned single dots.** Every learned point of a line was its own source in the distance weighting. A line with 23 points, half-way between it and one vowel dot, took about 95 % of the weight.
+
+What changed:
+- **Every snippet of a drawn line is now pitched, noise or both.** A snippet with a clear pitch keeps f0 and 48 harmonic strengths (a filled dot). A snippet without a pitch that is a clear hiss keeps its noise spectrum in 24 bands, with no f0 (a hollow ring). A pitched snippet with strong high noise between its harmonics, like a "zzz", keeps both, plus the share of each (a half-filled dot). Silence and unclear snippets are still skipped and counted.
+- **Hiss no longer hides a pitch.** Strong hiss can stop the pitch tracker. When no pitch is found, the app now looks again below 1.5 kHz, where the voice is and most hiss is not, and measures the harmonics on the original sound at that pitch. A pure "sss" or "shh" has no pitch there either, so it stays noise only. This also applies to single 🎤 recordings: a voiced fricative is now kept as a sound with both parts instead of being rejected.
+- **A drawn line counts as one source.** Its sound is the one at the spot on the line closest to the marker, interpolated between the two learned points around it. So a long or dense line weighs the same as a single dot at the same distance. Half-way between the vowel dot and the 23-point line, the line now gets 50 %.
+- **One blend of the two parts.** As before, the map blends parameters, not recordings. The pitched part (f0 and harmonics) is averaged over the pitched share of each source only, and the noise spectrum over the noise share only. One synthesizer plays both parts at equal-power gains.
+- **Clearer display.**
+  - The bars show one row per sound or drawn line, with its kind and a bar split into pitched and noise parts.
+  - "Detailed breakdown" lists every source's share, its pitched and noise parts, and for a line the time along the take and the two dots used.
+  - "Resulting levels" shows the pitched and noise shares with the gains the synthesizer uses. While sound is on, it also shows what was measured at the output.
+  - The shares are the exact weights passed to the synthesizer.
+- **Existing takes.** A take saved by the old pitch-only analysis is analyzed again automatically from its stored recording when the page loads. A backup copy of the map is kept in the browser first, and a note says what changed. If the recording is not stored, the take is flagged "Record it again" and left as it was. Recordings and placed sounds are not changed.
+- **Saved format.** Only new fields were added (each take point's kind, voiced share and noise bands, plus the take's analysis version and start offset), so existing maps load as before.
+- **Tour.** The "Draw + record" and "What you hear" steps explain fricative lines, the one-source rule and the levels.
+
+What Claude tested, all simulated (a synthetic microphone with pitched tones and high-passed noise, generated arm poses, Playwright's mouse; audio ran in headless Chromium with the sound card disabled). 202 unit tests and the build pass. The browser script passed 97 of 97 checks:
+- **Drawing while hissing.** A line drawn while the fake mic hissed "sss" saved 23 noise dots out of 23 snippets, with no f0 and 24 noise bands each, drawn as hollow rings.
+- **Moving from a vowel dot to the fricative line in 9 steps**, with sound on:
+  - The noise share rose 0 → 2 → 10 → 26 → 50 → 74 → 90 → 98 → 100 %, with one synth voice throughout and the line as one source.
+  - **Actual output, measured with an analyser on the synthesizer's output.** The share of energy on the harmonics of f0 went 100 → 98 → 89 → 71 → 43 → 21 → 9 → 2 → 0 %. On the line, 97 % of the energy was above 2 kHz. The level stayed at about −24 dBFS.
+  - The noise parts shown in the bars added up to the noise part the synthesizer played.
+- **Old take.** A take saved as the old analysis would have saved a pure hiss (no points at all) was analyzed again on reload and got its 23 noise dots back. A copy whose recording was missing was flagged "Record it again". The "ah" recording was unchanged.
+- **Unit tests on generated signals.** A vowel snippet is pitched, a hiss is noise, and a 150 Hz buzz plus hiss is kept with both parts (single snippets and 3 s recordings). A vowel-then-hiss take gives pitched dots then noise dots in the right places. An old take is analyzed again with its dots in the same place. The noise share between a dot and a line rises gradually.
+- **Everything from before still passed.**
+
+What I still need to check myself, by listening:
+- Was my real fricative take re-analyzed on load, and what did the note say?
+- Does moving from my vowel toward the line sound like one sound gradually turning into a hiss, and does the hiss sound like my "shh"?
+- How are my real "zzz" or breathy vowels classified? The voiced-fricative detection was only tested on generated signals, because the fake microphone in the browser test cannot hum and hiss at once.
+- Does a quiet hiss under a loud vowel stay a plain vowel? The noise has to be about a third of the energy between the harmonics before it is kept.
+
 ### My own testing
 
 To confirm: recording and drawing with my own voice and microphone, listening to the blends, and trying the pose map (right elbow bend and left arm lift) with my own body in front of my laptop camera. For Motion Morph, also: starting from the empty map, recording "ah" and "ee" and placing one by clicking and one by pose, checking that bending only my right elbow moves the marker sideways and lifting only my left arm moves it up (with the mirrored preview), using Clear map and placing a recording again, recording a hum and a vowel, holding a pose after the countdown from a few steps back, drawing a take while singing ah → ee → oo, playing everything with my arms, and running "Adjust to my movement" and checking that my saved poses still play the same sounds.

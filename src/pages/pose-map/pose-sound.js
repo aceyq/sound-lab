@@ -2,16 +2,20 @@
 // (fricatives such as "sss", "shh", "fff") on one map, blended into ONE
 // synthesized sound. Pure logic (no DOM, no Web Audio), unit-tested.
 //
-// Pitched sound (vowel, hum):   f0 + 48 harmonic strengths (sound-analysis.js)
-// Noise sound (fricative):      no f0 at all; the shape of its noise spectrum
-//                               as NOISE_BANDS band levels (quarter-octave-ish
-//                               bands, 200 Hz–12 kHz)
+// Every sound (a recorded dot, or one learned point of a drawn take) is
+//   voiced share v (0…1), f0 + 48 harmonic strengths (when v > 0), and a
+//   noise spectrum as NOISE_BANDS band levels (when v < 1):
+// Pitched sound (vowel, hum):   v = 1, f0 + harmonics
+// Noise sound (fricative):      v = 0, no f0 at all, only the noise spectrum
+//                               (quarter-octave-ish bands, 200 Hz–12 kHz)
+// Mixed sound ("zzz", breathy): 0 < v < 1, both parts (v = share of the
+//                               energy at the harmonics)
 //
 // Blending at a map point with weights wᵢ (sum 1, inverse distance):
-//   H = Σ wᵢ over pitched sounds,   N = Σ wᵢ over noise sounds  (H + N = 1)
-//   f0 and harmonic strengths: weighted mean over the PITCHED sounds only
-//     (weights wᵢ / H), so no pitch is ever invented for a fricative
-//   noise band levels: weighted mean over the NOISE sounds only (wᵢ / N)
+//   H = Σ wᵢ vᵢ (pitched part),   N = Σ wᵢ (1 − vᵢ) (noise part),  H + N = 1
+//   f0 and harmonic strengths: weighted mean with weights wᵢ vᵢ, so a
+//     fricative never contributes (or invents) a pitch
+//   noise band levels: weighted mean with weights wᵢ (1 − vᵢ)
 //   the synthesizer plays the harmonic part at gain √H and the noise part at
 //     gain √N, each first brought to the same loudness: an equal-power
 //     crossfade, so a half-way point is not quieter than either end.
@@ -19,6 +23,7 @@
 // point (N = 0) plays only the harmonics, exactly as before.
 import { MAX_HARMONICS } from '../frequency/vowel-model.js';
 import { fft } from '../frequency/vowel-model.js';
+import { analyzeVowel } from '../frequency/auto-vowel.js';
 
 export const NOISE_LO_HZ = 200;
 export const NOISE_HI_HZ = 12000;
@@ -110,20 +115,27 @@ export function classifyNoise(spec, periodicShare) {
   return { ok: true, code: null, reason: '' };
 }
 
-/** Playable parameters of one analysis: { kind, f0, amps, bands }. */
+/**
+ * Playable parameters of one analysis (a recorded sound or a take point):
+ * { kind: 'pitched' | 'noise' | 'mixed', voiced, f0, amps, bands }.
+ * Accepts { kind, f0, amps, voiced, noise: { bands } } or a take point's flat
+ * { kind, f0, amps, voiced, bands }. null when nothing is playable.
+ */
 export function soundParams(analysis) {
   if (!analysis) return null;
-  if (analysis.kind === 'noise') {
-    const b = analysis.noise && Array.isArray(analysis.noise.bands) ? analysis.noise.bands : null;
-    if (!b || !b.some((v) => v > 0)) return null;
-    return { kind: 'noise', f0: NaN, amps: new Array(MAX_HARMONICS).fill(0), bands: cleanBands(b) };
-  }
+  const rawBands = analysis.noise && Array.isArray(analysis.noise.bands) ? analysis.noise.bands : Array.isArray(analysis.bands) ? analysis.bands : null;
+  const bands = rawBands ? cleanBands(rawBands) : null;
+  const hasBands = !!bands && bands.some((v) => v > 0);
   const f0 = Number(analysis.f0);
-  if (!(f0 > 0) || !Array.isArray(analysis.amps)) return null;
   const amps = new Array(MAX_HARMONICS).fill(0);
-  for (let i = 0; i < MAX_HARMONICS && i < analysis.amps.length; i++) { const v = Number(analysis.amps[i]); amps[i] = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0; }
-  if (!amps.some((v) => v > 0)) return null;
-  return { kind: 'pitched', f0, amps, bands: null };
+  if (Array.isArray(analysis.amps)) for (let i = 0; i < MAX_HARMONICS && i < analysis.amps.length; i++) { const v = Number(analysis.amps[i]); amps[i] = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0; }
+  const hasPitch = f0 > 0 && amps.some((v) => v > 0);
+  if (analysis.kind === 'noise') return hasBands ? { kind: 'noise', voiced: 0, f0: NaN, amps: new Array(MAX_HARMONICS).fill(0), bands } : null;
+  if (analysis.kind === 'mixed' && hasPitch && hasBands) {
+    const v = Math.max(0, Math.min(1, Number(analysis.voiced)));
+    return { kind: 'mixed', voiced: Number.isFinite(v) ? v : 0.5, f0, amps, bands };
+  }
+  return hasPitch ? { kind: 'pitched', voiced: 1, f0, amps, bands: null } : null;
 }
 
 export function cleanBands(b) {
@@ -141,31 +153,152 @@ export function blendSounds(items) {
   const list = items.filter((it) => it && it.params && it.weight > 0);
   const total = list.reduce((s, it) => s + it.weight, 0);
   if (!list.length || !(total > 0)) return null;
-  const pitched = list.filter((it) => it.params.kind !== 'noise');
-  const noisy = list.filter((it) => it.params.kind === 'noise');
-  const H = pitched.reduce((s, it) => s + it.weight, 0) / total;
-  const N = noisy.reduce((s, it) => s + it.weight, 0) / total;
+  const vOf = (it) => (it.params.voiced != null ? it.params.voiced : it.params.kind === 'noise' ? 0 : 1);
+  let H = 0;
+  let N = 0;
+  for (const it of list) { const w = it.weight / total; H += w * vOf(it); N += w * (1 - vOf(it)); }
   let f0 = NaN;
   const amps = new Array(MAX_HARMONICS).fill(0);
-  if (pitched.length) {
-    const ph = pitched.reduce((s, it) => s + it.weight, 0);
-    const full = pitched.find((it) => it.weight === ph);
-    if (full) { f0 = full.params.f0; for (let n = 0; n < MAX_HARMONICS; n++) amps[n] = full.params.amps[n]; } else {
+  const pw = list.map((it) => it.weight * vOf(it));
+  const ph = pw.reduce((a, b) => a + b, 0);
+  if (ph > 0) {
+    const fullI = pw.findIndex((x) => x === ph);
+    if (fullI >= 0) { f0 = list[fullI].params.f0; for (let n = 0; n < MAX_HARMONICS; n++) amps[n] = list[fullI].params.amps[n]; } else {
       f0 = 0;
-      for (const it of pitched) {
-        const w = it.weight / ph;
+      list.forEach((it, i) => {
+        if (!pw[i]) return;
+        const w = pw[i] / ph;
         f0 += w * it.params.f0;
         for (let n = 0; n < MAX_HARMONICS; n++) amps[n] += w * (it.params.amps[n] || 0);
-      }
+      });
     }
   }
   let bands = null;
-  if (noisy.length) {
-    const nh = noisy.reduce((s, it) => s + it.weight, 0);
+  const nw = list.map((it) => it.weight * (1 - vOf(it)));
+  const nh = nw.reduce((a, b) => a + b, 0);
+  if (nh > 0) {
     bands = new Array(NOISE_BANDS).fill(0);
-    for (const it of noisy) { const w = it.weight / nh; for (let b = 0; b < NOISE_BANDS; b++) bands[b] += w * it.params.bands[b]; }
+    list.forEach((it, i) => { if (!nw[i]) return; const w = nw[i] / nh; for (let b = 0; b < NOISE_BANDS; b++) bands[b] += w * it.params.bands[b]; });
   }
   return { f0, amps: amps.map((a) => Math.min(1, a)), harm: H, noise: N, bands };
+}
+
+/** A blend result as parameters again (so a take's interpolated point can enter the map blend). */
+export function asParams(b) {
+  if (!b) return null;
+  const hasPitch = Number.isFinite(b.f0) && b.harm > 0;
+  const hasNoise = !!b.bands && b.noise > 0;
+  if (hasPitch && !hasNoise) return { kind: 'pitched', voiced: 1, f0: b.f0, amps: b.amps, bands: null };
+  if (!hasPitch && hasNoise) return { kind: 'noise', voiced: 0, f0: NaN, amps: new Array(MAX_HARMONICS).fill(0), bands: b.bands };
+  if (!hasPitch && !hasNoise) return null;
+  return { kind: 'mixed', voiced: b.harm, f0: b.f0, amps: b.amps, bands: b.bands };
+}
+
+/**
+ * A drawn take as ONE source on the map. Its learned points (in time order,
+ * each with pos {x, y} and params) form a line; the source sits at the point
+ * of that line nearest to `here`, and its sound is interpolated between the
+ * two learned points on either side. So a take with 40 points counts like
+ * one dot that slides along the line, instead of 40 dots that together would
+ * outweigh a single recorded sound.
+ * Returns { pos, params, i, u, distance } (i = index of the segment start, u = 0…1 along it).
+ */
+export function takeSource(points, here) {
+  const pts = points.filter((p) => p && p.pos && p.params);
+  if (!pts.length) return null;
+  if (pts.length === 1) return { pos: { ...pts[0].pos }, params: pts[0].params, i: 0, u: 0, distance: Math.hypot(pts[0].pos.x - here.x, pts[0].pos.y - here.y) };
+  let best = null;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i].pos; const b = pts[i + 1].pos;
+    const dx = b.x - a.x; const dy = b.y - a.y;
+    const L2 = dx * dx + dy * dy;
+    const u = L2 > 1e-12 ? Math.max(0, Math.min(1, ((here.x - a.x) * dx + (here.y - a.y) * dy) / L2)) : 0;
+    const q = { x: a.x + u * dx, y: a.y + u * dy };
+    const d = Math.hypot(q.x - here.x, q.y - here.y);
+    if (!best || d < best.distance - 1e-12) best = { pos: q, i, u, distance: d };
+  }
+  const A = pts[best.i].params; const B = pts[best.i + 1].params;
+  best.params = best.u <= 1e-9 ? A : best.u >= 1 - 1e-9 ? B : asParams(blendSounds([{ params: A, weight: 1 - best.u }, { params: B, weight: best.u }]));
+  return best;
+}
+
+/**
+ * Pitched vs noise energy of samples[from, to) with a known f0: power within
+ * ±max(15 % of f0, 2 FFT bins) of each harmonic counts as pitched, the rest
+ * (200 Hz–12 kHz) as noise. Returns { noiseShare, bands (of the residual), highShare }.
+ */
+export function harmonicResidual(x, sampleRate, f0, { from = 0, to = x.length } = {}) {
+  const N = 2048;
+  const hop = N / 2;
+  const w = hann(N);
+  const bins = N / 2;
+  const psd = new Float64Array(bins);
+  let frames = 0;
+  for (let s = from; s + N <= to; s += hop) {
+    const re = new Float64Array(N);
+    const im = new Float64Array(N);
+    for (let i = 0; i < N; i++) re[i] = x[s + i] * w[i];
+    fft(re, im);
+    for (let k = 0; k < bins; k++) psd[k] += re[k] * re[k] + im[k] * im[k];
+    frames++;
+  }
+  if (!frames || !(f0 > 0)) return null;
+  const binHz = sampleRate / N;
+  const half = Math.max(0.15 * f0, 2 * binHz);
+  let harm = 0; let res = 0; let high = 0;
+  const bandPow = new Array(NOISE_BANDS).fill(0);
+  const bandCnt = new Array(NOISE_BANDS).fill(0);
+  for (let k = 1; k < bins; k++) {
+    const f = k * binHz;
+    if (f < NOISE_LO_HZ || f >= Math.min(NOISE_HI_HZ, sampleRate / 2)) continue;
+    const p = psd[k] / frames;
+    const n = Math.round(f / f0);
+    const nearHarm = n >= 1 && n <= MAX_HARMONICS && Math.abs(f - n * f0) <= half;
+    let b = 0;
+    while (b < NOISE_BANDS - 1 && f >= BAND_EDGES[b + 1]) b++;
+    bandCnt[b]++;
+    if (nearHarm) { harm += p; continue; }
+    res += p; bandPow[b] += p; if (f >= 2000) high += p;
+  }
+  const amp = bandPow.map((pp, b) => Math.sqrt(bandCnt[b] ? pp / bandCnt[b] : 0));
+  const peak = Math.max(...amp);
+  return { noiseShare: harm + res > 0 ? res / (harm + res) : 0, bands: amp.map((a) => (peak > 0 ? a / peak : 0)), highShare: res > 0 ? high / res : 0 };
+}
+
+// A pitched sound is kept as MIXED (both parts) when at least this share of
+// its energy is noise between the harmonics, mostly above 2 kHz (a voiced
+// fricative like "zzz", or a very breathy vowel). Below it, the small
+// residual is room noise and breath, and the sound stays purely pitched.
+export const MIXED_RULES = Object.freeze({ minNoiseShare: 0.3, minHighShare: 0.5 });
+
+/** { voiced, bands } for a pitched analysis, or null when it is (nearly) pure. */
+export function mixedPart(x, sampleRate, f0, range) {
+  const r = harmonicResidual(x, sampleRate, f0, range);
+  if (!r || r.noiseShare < MIXED_RULES.minNoiseShare || r.highShare < MIXED_RULES.minHighShare) return null;
+  return { voiced: Math.round((1 - r.noiseShare) * 1000) / 1000, bands: r.bands, noiseShare: r.noiseShare };
+}
+
+/**
+ * One drawn-take snippet → a learned point's sound, or why it was skipped.
+ *   pitch     analyzeVowel result for the snippet
+ * Returns { outcome: 'pitched' | 'mixed' | 'noise' | 'silent' | 'unreliable', params? }
+ */
+export function snippetSound(x, sampleRate, { from, to }, pitch) {
+  const silent = (pitch.problems || []).some((p) => p.code === 'silent');
+  if (silent) return { outcome: 'silent' };
+  const amps = pitch.amps ? pitch.amps.slice(0, MAX_HARMONICS) : null;
+  const pitched = pitch.status !== 'failed' && Number.isFinite(pitch.f0) && pitch.f0 > 0 && amps && amps.some((a) => a > 0);
+  if (pitched) {
+    const m = mixedPart(x, sampleRate, pitch.f0, { from, to });
+    if (m) return { outcome: 'mixed', params: { kind: 'mixed', voiced: m.voiced, f0: pitch.f0, amps, bands: m.bands } };
+    return { outcome: 'pitched', params: { kind: 'pitched', voiced: 1, f0: pitch.f0, amps, bands: null } };
+  }
+  const spec = noiseSpectrum(x, sampleRate, { from, to });
+  const share = pitch.stats && pitch.stats.framesTotal ? pitch.stats.framesPeriodic / pitch.stats.framesTotal : 0;
+  // a short snippet's periodic share is noisy: only the level and the spectrum decide here
+  const c = classifyNoise(spec, Math.min(share, NOISE_RULES.maxPeriodicShare));
+  if (c.ok) return { outcome: 'noise', params: { kind: 'noise', voiced: 0, f0: NaN, amps: new Array(MAX_HARMONICS).fill(0), bands: spec.bands } };
+  return { outcome: c.code === 'silent' ? 'silent' : 'unreliable' };
 }
 
 /** Synth gains of the two parts (equal-power crossfade). */
@@ -198,4 +331,36 @@ export function strongestBand(bands) {
   for (let i = 1; i < bands.length; i++) if (bands[i] > bands[best]) best = i;
   const f = BAND_CENTERS[best];
   return f >= 1000 ? `${(f / 1000).toFixed(1)} kHz` : `${Math.round(f)} Hz`;
+}
+
+export const HISS_LOWPASS_HZ = 1500;
+
+/** x[from…to) through a 2-pole low-pass (two one-pole stages) at `hz`, as a new array. */
+export function lowpassCopy(x, sampleRate, hz, { from = 0, to = x.length } = {}) {
+  const a = Math.exp((-2 * Math.PI * hz) / sampleRate);
+  const y = new Float32Array(Math.max(0, to - from));
+  let s1 = 0; let s2 = 0;
+  for (let i = 0; i < y.length; i++) { s1 = (1 - a) * x[from + i] + a * s1; s2 = (1 - a) * s1 + a * s2; y[i] = s2; }
+  return y;
+}
+
+/**
+ * The pitch analysis of a section (Vowel Lab's analyzeVowel), robust to hiss:
+ * strong high noise on top of a voiced sound (a "zzz", a breathy vowel) can
+ * stop the pitch tracker. When the plain analysis finds no pitch (and the
+ * section is not silent), the pitch is looked for again below 1.5 kHz, where
+ * the voice is and most hiss is not; if one is found there, the harmonics are
+ * measured on the ORIGINAL section at that pitch. The result is marked
+ * `viaLowpass: true`. Pure noise (“sss”, “shh”) has no pitch below 1.5 kHz
+ * either, so it still comes back without a pitch.
+ */
+export function findPitch(x, sampleRate, { from = 0, to = x.length } = {}, analyze = analyzeVowel) {
+  const r = analyze(x, sampleRate, { from, to });
+  const usable = (q) => q && q.status !== 'failed' && Number.isFinite(q.f0) && q.f0 > 0;
+  if (usable(r) || (r.problems || []).some((p) => p.code === 'silent' || p.code === 'too-short')) return r;
+  const low = analyze(lowpassCopy(x, sampleRate, HISS_LOWPASS_HZ, { from, to }), sampleRate);
+  if (!usable(low) || low.status === 'warning' && low.stats && low.stats.framesTotal && low.stats.framesPeriodic / low.stats.framesTotal < 0.5) return r;
+  const again = analyze(x, sampleRate, { from, to, f0Override: low.f0 });
+  if (!usable(again)) return r;
+  return { ...again, status: 'ok', warnings: (again.warnings || []).filter((w) => w.code !== 'manual'), stats: low.stats, viaLowpass: true };
 }
